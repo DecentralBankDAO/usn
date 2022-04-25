@@ -1,0 +1,40 @@
+[package]
+edition = "2018"
+name = "usn"
+version = "1.0.2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-contract-standards = "=4.0.0-pre.7"
+near-sdk = { version = "=4.0.0-pre.7", features = ["unstable"] }
+uint = { version = "=0.9.0", default-features = false }
+partial-min-max = "0.4.0"
+easy-ml = "1.8.1"
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = true
+opt-level = "s"
+overflow-checks = true
+panic = "abort"
+
+[profile.sandbox]
+inherits = "release"
+
+[profile.testnet]
+inherits = "release"
+
+[profile.mainnet]
+inherits = "release"
+
+[features]
+# Enables testnet configuration if expicitly stated.
+# It makes the USN contract use a testnet oracle.
+testnet = []
+
+# Enables mainnet configuration if expicitly stated.
+# It makes the USN contract use a main oracle.
+mainnet = []

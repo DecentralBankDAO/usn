@@ -4,37 +4,34 @@ use partial_min_max::{max, min};
 
 use crate::*;
 
-use super::ft::ext_ft;
-#[cfg(not(feature = "mainnet"))]
-use super::ft::REF_DEPOSIT_ACTION;
+use super::ft::{ext_ft, REF_DEPOSIT_ACTION};
 use super::gas::*;
 use super::pool::{Pool, USDT_DECIMALS};
 use super::ref_finance::*;
 
 const NEAR_DECIMALS: u8 = 24;
 
+// 50% slippage: minimizing chance to get failed but not too much.
+const SWAP_SLIPPAGE: f64 = 0.5;
+
 struct TreasuryConfig {
     pub wrap_id: &'static str,
-    #[cfg(not(feature = "mainnet"))]
     pub swap_pool_id: u64,
 }
 
 const CONFIG: TreasuryConfig = if cfg!(feature = "mainnet") {
     TreasuryConfig {
         wrap_id: "wrap.near",
-        #[cfg(not(feature = "mainnet"))]
         swap_pool_id: 4,
     }
 } else if cfg!(feature = "testnet") {
     TreasuryConfig {
         wrap_id: "wrap.testnet",
-        #[cfg(not(feature = "mainnet"))]
         swap_pool_id: 34,
     }
 } else {
     TreasuryConfig {
         wrap_id: "wrap.test.near",
-        #[cfg(not(feature = "mainnet"))]
         swap_pool_id: 3,
     }
 };
@@ -61,15 +58,10 @@ impl std::fmt::Display for TreasuryDecision {
     }
 }
 
-enum UpdateReserveAction {
-    Add(u128),
-    Sub(u128),
-}
-
 #[near_bindgen]
 impl Contract {
     #[payable]
-    pub fn balance_treasury(&mut self, pool_id: u64) -> PromiseOrValue<()> {
+    pub fn balance_treasury(&mut self, pool_id: u64, execute: Option<bool>) -> Promise {
         self.assert_owner_or_guardian();
 
         // Buy case: 2 yoctoNEAR, sell case: 3 yoctoNEAR.
@@ -78,55 +70,38 @@ impl Contract {
             "3 yoctoNEAR of attached deposit is required"
         );
 
-        let pool = Pool::from_config_with_assert(pool_id);
         let treasury = self.treasury.get().expect("Valid treasury");
-
-        #[cfg(feature = "mainnet")]
-        let _ = pool;
-
-        require!(
-            treasury.reserve.len() == 1,
-            "It's expected to have exactly one token in the reserve"
-        );
-
-        // Prepare input data to make decision about balancing.
-
-        // 1. NEAR/USDT exchange rates. Warming the cache if it's not ready.
-        let (time_points, exchange_rates) = match treasury.cache.collect(env::block_timestamp()) {
-            Ok((time_points, exchange_rates)) => (time_points, exchange_rates),
-            Err(_) => env::panic_str("Treasury cache is not warmed up. Use `warmup`."),
-        };
-
-        // 2. NEAR part of USN reserve in NEAR.
-        let near = U128::from(env::account_balance() - env::attached_deposit());
-
-        // 3. Total value of issued USN.
-        let usn = self.token.ft_total_supply();
-
-        // 4. USDT reserve. The first non-USN token currently.
-        let (_, &usdt) = treasury.reserve.iter().next().expect("USDT reserve");
-
-        // Convert everything into floats.
-        let near = near.0 as f64 / ONE_NEAR as f64;
-        let usn = usn.0 as f64 / 10u128.pow(USN_DECIMALS as u32) as f64;
-        #[cfg(not(feature = "mainnet"))]
-        let last_exchange_rate = *exchange_rates.last().unwrap();
-        let usdt = usdt.0 as f64 / 10f64.powi(USDT_DECIMALS as i32);
-
-        // Make a decision.
-        let decision = make_treasury_decision(exchange_rates, time_points, near, usn, usdt);
-
-        env::log_str(format!("{}", decision).as_str());
-
-        #[cfg(not(feature = "mainnet"))]
-        match decision {
-            TreasuryDecision::DoNothing => PromiseOrValue::Value(()),
-            TreasuryDecision::Buy(f_amount) => buy(pool.id, f_amount, last_exchange_rate).into(),
-            TreasuryDecision::Sell(f_amount) => sell(pool.id, f_amount, last_exchange_rate).into(),
+        if let Err(_) = treasury.cache.collect(env::block_timestamp()) {
+            env::panic_str("Treasury cache is not warmed up. Use `warmup`.");
         }
 
-        #[cfg(feature = "mainnet")]
-        PromiseOrValue::Value(())
+        let pool = Pool::from_config_with_assert(pool_id);
+
+        // Start with figuring out USDT part of reserve.
+        ext_ref_finance::get_pool_shares(
+            pool.id,
+            env::current_account_id(),
+            pool.ref_id,
+            NO_DEPOSIT,
+            GAS_FOR_GET_SHARES,
+        )
+        .then(ext_self::predict_remove_liquidity(
+            pool.id,
+            env::current_account_id(),
+            NO_DEPOSIT,
+            GAS_SURPLUS + GAS_FOR_PREDICT_REMOVE_LIQUIDITY,
+        ))
+        .then(ext_self::handle_start_treasury_balancing(
+            pool.id,
+            execute,
+            env::current_account_id(),
+            env::attached_deposit(),
+            GAS_SURPLUS * 4
+                + GAS_FOR_REMOVE_LIQUIDITY
+                + GAS_FOR_SWAP
+                + GAS_FOR_WITHDRAW
+                + GAS_FOR_NEAR_WITHDRAW,
+        ))
     }
 
     pub fn warmup(&mut self) -> Promise {
@@ -138,13 +113,202 @@ impl Contract {
     }
 }
 
-#[cfg(not(feature = "mainnet"))]
+#[ext_contract(ext_self)]
+trait SelfHandler {
+    #[private]
+    #[payable]
+    fn handle_start_treasury_balancing(
+        &mut self,
+        pool_id: u64,
+        execute: Option<bool>,
+        #[callback] amounts: Ve<U128>,
+    ) -> PromiseOrValue<()>;
+
+    #[private]
+    #[payable]
+    fn handle_withdraw_after_swap(
+        &mut self,
+        pool_id: u64,
+        #[callback] wrap_amount: U128,
+    ) -> Promise;
+
+    #[private]
+    #[payable]
+    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise;
+
+    #[private]
+    fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData);
+
+    #[private]
+    fn predict_remove_liquidity(&self, pool_id: u64, #[callback] shares: U128) -> Promise;
+}
+
+trait SelfHandler {
+    fn handle_start_treasury_balancing(
+        &mut self,
+        pool_id: u64,
+        execute: Option<bool>,
+        amounts: Vec<U128>,
+    ) -> PromiseOrValue<()>;
+
+    fn handle_withdraw_after_swap(&mut self, pool_id: u64, wrap_amount: U128) -> Promise;
+
+    fn handle_liquidity_after_swap(&mut self, pool_id: u64, amount: U128) -> Promise;
+
+    fn handle_exchange_rate_cache(&mut self, price: PriceData);
+
+    fn predict_remove_liquidity(&self, pool_id: u64, shares: U128) -> Promise;
+}
+
+#[near_bindgen]
+impl SelfHandler for Contract {
+    #[private]
+    #[payable]
+    fn handle_start_treasury_balancing(
+        &mut self,
+        pool_id: u64,
+        execute: Option<bool>,
+        #[callback] amounts: Vec<U128>,
+    ) -> PromiseOrValue<()> {
+        let pool = Pool::from_config_with_assert(pool_id);
+
+        require!(amounts.len() == 2, "A pool of 2 tokens is required");
+
+        let treasury = self.treasury.get().expect("Valid treasury");
+
+        // Prepare input data to make decision about balancing.
+
+        // 1. NEAR/USDT exchange rates.
+        let (time_points, exchange_rates) = match treasury.cache.collect(env::block_timestamp()) {
+            Ok((time_points, exchange_rates)) => (time_points, exchange_rates),
+            Err(_) => env::panic_str("Treasury cache is not in a valid state."),
+        };
+
+        // 2. NEAR part of USN reserve in NEAR.
+        let near = U128::from(env::account_balance() - env::attached_deposit());
+
+        // 3. Total value of issued USN.
+        let usn = self.token.ft_total_supply();
+
+        // 4. USDT reserve.
+        let usdt = pool
+            .tokens
+            .iter()
+            .zip(amounts)
+            .find_map(|(token_id, amount)| {
+                if token_id != &env::current_account_id() {
+                    Some(amount)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Convert everything into floats.
+        let near = near.0 as f64 / ONE_NEAR as f64;
+        let usn = usn.0 as f64 / 10f64.powi(USDT_DECIMALS as i32);
+        let last_exch_rate = *exchange_rates.last().unwrap();
+        let usdt = usdt.0 as f64 / 10f64.powi(USDT_DECIMALS as i32);
+
+        // Make a decision.
+        let decision = make_treasury_decision(exchange_rates, time_points, near, usn, usdt);
+
+        env::log_str(format!("{}", decision).as_str());
+
+        if execute.unwrap_or(false) {
+            match decision {
+                TreasuryDecision::DoNothing => PromiseOrValue::Value(()),
+                TreasuryDecision::Buy(f_amount) => buy(pool.id, f_amount, last_exch_rate).into(),
+                TreasuryDecision::Sell(f_amount) => sell(pool.id, f_amount, last_exch_rate).into(),
+            }
+        } else {
+            env::log_str("Execution bypassed");
+            PromiseOrValue::Value(())
+        }
+    }
+
+    #[private]
+    #[payable]
+    fn handle_withdraw_after_swap(
+        &mut self,
+        pool_id: u64,
+        #[callback] wrap_amount: U128,
+    ) -> Promise {
+        let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
+        let pool = Pool::from_config_with_assert(pool_id);
+
+        ext_ref_finance::withdraw(
+            wrap_id.clone(),
+            wrap_amount,
+            None,
+            pool.ref_id,
+            ONE_YOCTO,
+            GAS_FOR_WITHDRAW,
+        )
+        .then(ext_ft::near_withdraw(
+            wrap_amount,
+            wrap_id,
+            ONE_YOCTO,
+            GAS_FOR_NEAR_WITHDRAW,
+        ))
+    }
+
+    #[private]
+    #[payable]
+    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise {
+        let pool = Pool::from_config_with_assert(pool_id);
+
+        let add_amounts = pool
+            .tokens
+            .iter()
+            .map(|token_id| {
+                if token_id == &env::current_account_id() {
+                    U128(0u128)
+                } else {
+                    amount
+                }
+            })
+            .collect();
+
+        let min_shares = U128::from(0u128);
+
+        ext_ref_finance::add_stable_liquidity(
+            pool.id,
+            add_amounts,
+            min_shares,
+            pool.ref_id,
+            ONE_YOCTO,
+            GAS_FOR_ADD_LIQUIDITY,
+        )
+    }
+
+    #[private]
+    fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData) {
+        let mut treasury = self.treasury.take().unwrap();
+        let rate: ExchangeRate = price.into();
+        let rate = rate.multiplier() as f64 / 10f64.powi((rate.decimals() - NEAR_DECIMALS) as i32);
+        treasury.cache.append(env::block_timestamp(), rate);
+        self.treasury.replace(&treasury);
+    }
+
+    #[private]
+    fn predict_remove_liquidity(&self, pool_id: u64, #[callback] shares: U128) -> Promise {
+        let pool = Pool::from_config_with_assert(pool_id);
+        ext_ref_finance::predict_remove_liquidity(
+            pool.id,
+            shares,
+            pool.ref_id,
+            NO_DEPOSIT,
+            GAS_FOR_PREDICT_REMOVE_LIQUIDITY,
+        )
+    }
+}
+
 fn buy(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
     let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
     let pool = Pool::from_config_with_assert(pool_id);
     let near = ((amount / exchange_rate) * ONE_NEAR as f64) as u128;
-    // TODO: 50% slippage is because it gets less than expected. Need to figure out.
-    let min_amount = (amount * 0.50 * 10f64.powi(USDT_DECIMALS as i32)) as u128;
+    let min_amount = (amount * SWAP_SLIPPAGE * 10f64.powi(USDT_DECIMALS as i32)) as u128;
 
     env::log_str(&format!("Trying to wrap {} NEAR", near));
 
@@ -183,17 +347,16 @@ fn buy(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
             pool.id,
             env::current_account_id(),
             ONE_YOCTO,
-            GAS_SURPLUS + GAS_FOR_WITHDRAW,
+            GAS_SURPLUS + GAS_FOR_ADD_LIQUIDITY,
         ))
 }
 
-#[cfg(not(feature = "mainnet"))]
 fn sell(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
     let wrap_id = CONFIG.wrap_id.parse().unwrap();
     let pool = Pool::from_config_with_assert(pool_id);
     let usdt_amount = (amount * 10f64.powi(USDT_DECIMALS as i32)) as u128;
-    // TODO: 50% slippage is because it gets less than expected. Need to figure out.
-    let min_amount = ((amount * 0.50 / exchange_rate) * 10f64.powi(USN_DECIMALS as i32)) as u128;
+    let min_amount =
+        ((amount * SWAP_SLIPPAGE / exchange_rate) * 10f64.powi(USN_DECIMALS as i32)) as u128;
 
     let usdt_name = pool
         .tokens
@@ -240,129 +403,10 @@ fn sell(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
     ))
     .then(ext_self::handle_withdraw_after_swap(
         pool.id,
-        usdt_amount.into(),
         env::current_account_id(),
         2 * ONE_YOCTO,
         GAS_SURPLUS * 2 + GAS_FOR_WITHDRAW + GAS_FOR_NEAR_WITHDRAW,
     ))
-}
-
-#[ext_contract(ext_self)]
-trait SelfHandler {
-    #[private]
-    #[payable]
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usdt_amount: U128,
-        #[callback] wrap_amount: U128,
-    ) -> Promise;
-
-    #[private]
-    #[payable]
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise;
-
-    #[private]
-    fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData);
-}
-
-trait SelfHandler {
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usdt_amount: U128,
-        wrap_amount: U128,
-    ) -> Promise;
-
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, amount: U128) -> Promise;
-
-    fn handle_exchange_rate_cache(&mut self, price: PriceData);
-}
-
-#[near_bindgen]
-impl SelfHandler for Contract {
-    #[private]
-    #[payable]
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usdt_amount: U128,
-        #[callback] wrap_amount: U128,
-    ) -> Promise {
-        let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
-        let pool = Pool::from_config_with_assert(pool_id);
-
-        self.update_reserve(UpdateReserveAction::Sub(usdt_amount.into()));
-
-        ext_ref_finance::withdraw(
-            wrap_id.clone(),
-            wrap_amount,
-            None,
-            pool.ref_id,
-            ONE_YOCTO,
-            GAS_FOR_WITHDRAW,
-        )
-        .then(ext_ft::near_withdraw(
-            wrap_amount,
-            wrap_id,
-            ONE_YOCTO,
-            GAS_FOR_NEAR_WITHDRAW,
-        ))
-    }
-
-    #[private]
-    #[payable]
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise {
-        let pool = Pool::from_config_with_assert(pool_id);
-
-        self.update_reserve(UpdateReserveAction::Add(amount.into()));
-
-        let add_amounts = pool
-            .tokens
-            .iter()
-            .map(|token_id| {
-                if token_id == &env::current_account_id() {
-                    U128(0u128)
-                } else {
-                    amount
-                }
-            })
-            .collect();
-
-        let min_shares = U128::from(0u128); // TODO: Any limits?
-
-        ext_ref_finance::add_stable_liquidity(
-            pool.id,
-            add_amounts,
-            min_shares,
-            pool.ref_id,
-            ONE_YOCTO,
-            GAS_FOR_ADD_LIQUIDITY,
-        )
-    }
-
-    #[private]
-    fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData) {
-        let mut treasury = self.treasury.take().unwrap();
-        let rate: ExchangeRate = price.into();
-        let rate = rate.multiplier() as f64 / 10f64.powi((rate.decimals() - NEAR_DECIMALS) as i32);
-        treasury.cache.append(env::block_timestamp(), rate);
-        self.treasury.replace(&treasury);
-    }
-}
-
-impl Contract {
-    fn update_reserve(&mut self, action: UpdateReserveAction) {
-        let mut treasury = self.treasury.take().expect("Valid treasury");
-        require!(treasury.reserve.len() == 1);
-        for (_, val) in treasury.reserve.iter_mut() {
-            match action {
-                UpdateReserveAction::Add(amount) => *val = U128(val.0 + amount),
-                UpdateReserveAction::Sub(amount) => *val = U128(val.0 - amount),
-            }
-        }
-        self.treasury.replace(&treasury);
-    }
 }
 
 fn make_treasury_decision(

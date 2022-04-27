@@ -4,7 +4,7 @@ name = "usn"
 version = "1.0.2"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 near-contract-standards = "=4.0.0-pre.7"

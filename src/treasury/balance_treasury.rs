@@ -81,7 +81,7 @@ impl Contract {
         ext_ref_finance::get_pool_shares(
             pool.id,
             env::current_account_id(),
-            pool.ref_id,
+            pool.ref_id.clone(),
             NO_DEPOSIT,
             GAS_FOR_GET_SHARES,
         )
@@ -90,6 +90,12 @@ impl Contract {
             env::current_account_id(),
             NO_DEPOSIT,
             GAS_SURPLUS + GAS_FOR_PREDICT_REMOVE_LIQUIDITY,
+        ))
+        .and(ext_ref_finance::get_stable_pool(
+            pool.id,
+            pool.ref_id,
+            NO_DEPOSIT,
+            GAS_FOR_GET_STABLE_POOL,
         ))
         .then(ext_self::handle_start_treasury_balancing(
             pool.id,
@@ -121,7 +127,8 @@ trait SelfHandler {
         &mut self,
         pool_id: u64,
         execute: Option<bool>,
-        #[callback] amounts: Ve<U128>,
+        #[callback] predicted_amounts: Vec<U128>,
+        #[callback] info: StablePoolInfo,
     ) -> PromiseOrValue<()>;
 
     #[private]
@@ -148,7 +155,8 @@ trait SelfHandler {
         &mut self,
         pool_id: u64,
         execute: Option<bool>,
-        amounts: Vec<U128>,
+        predicted_amounts: Vec<U128>,
+        info: StablePoolInfo,
     ) -> PromiseOrValue<()>;
 
     fn handle_withdraw_after_swap(&mut self, pool_id: u64, wrap_amount: U128) -> Promise;
@@ -168,11 +176,15 @@ impl SelfHandler for Contract {
         &mut self,
         pool_id: u64,
         execute: Option<bool>,
-        #[callback] amounts: Vec<U128>,
+        #[callback] predicted_amounts: Vec<U128>,
+        #[callback] info: StablePoolInfo,
     ) -> PromiseOrValue<()> {
         let pool = Pool::from_config_with_assert(pool_id);
 
-        require!(amounts.len() == 2, "A pool of 2 tokens is required");
+        require!(
+            predicted_amounts.len() == 2,
+            "A pool of 2 tokens is required"
+        );
 
         let treasury = self.treasury.get().expect("Valid treasury");
 
@@ -185,30 +197,36 @@ impl SelfHandler for Contract {
         };
 
         // 2. NEAR part of USN reserve in NEAR.
-        let near = U128::from(env::account_balance() - env::attached_deposit());
+        let near = env::account_balance() - env::attached_deposit();
 
-        // 3. Total value of issued USN.
-        let usn = self.token.ft_total_supply();
+        // A little helper.
+        let extract_amount = |usn: bool, amounts: Vec<U128>| {
+            pool.tokens
+                .iter()
+                .zip(amounts)
+                .find_map(|(token_id, amount)| {
+                    if (usn && token_id == &env::current_account_id())
+                        || (!usn && token_id != &env::current_account_id())
+                    {
+                        Some(amount)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
+
+        // 3. Total value of circulating USN.
+        let usn = self.token.ft_total_supply().0 - extract_amount(true, info.amounts).0;
 
         // 4. USDT reserve.
-        let usdt = pool
-            .tokens
-            .iter()
-            .zip(amounts)
-            .find_map(|(token_id, amount)| {
-                if token_id != &env::current_account_id() {
-                    Some(amount)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let usdt = extract_amount(false, predicted_amounts).0;
 
         // Convert everything into floats.
-        let near = near.0 as f64 / ONE_NEAR as f64;
-        let usn = usn.0 as f64 / 10f64.powi(USDT_DECIMALS as i32);
+        let near = near as f64 / ONE_NEAR as f64;
+        let usn = usn as f64 / 10f64.powi(USDT_DECIMALS as i32);
         let last_exch_rate = *exchange_rates.last().unwrap();
-        let usdt = usdt.0 as f64 / 10f64.powi(USDT_DECIMALS as i32);
+        let usdt = usdt as f64 / 10f64.powi(USDT_DECIMALS as i32);
 
         // Make a decision.
         let decision = make_treasury_decision(exchange_rates, time_points, near, usn, usdt);

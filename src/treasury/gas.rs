@@ -2,6 +2,7 @@ use near_sdk::Gas;
 
 pub const GAS_FOR_GET_DEPOSITS: Gas = Gas(10_000_000_000_000);
 pub const GAS_FOR_GET_SHARES: Gas = Gas(10_000_000_000_000);
+pub const GAS_FOR_GET_STABLE_POOL: Gas = Gas(10_000_000_000_000);
 pub const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas(45_000_000_000_000);
 pub const GAS_FOR_ADD_LIQUIDITY: Gas = Gas(17_000_000_000_000);
 pub const GAS_FOR_PREDICT_REMOVE_LIQUIDITY: Gas = Gas(13_000_000_000_000);

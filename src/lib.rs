@@ -381,7 +381,7 @@ impl Contract {
             // But the refund will still happen.
             .as_return()
             .then(ext_self::handle_refund(
-                account,
+                env::predecessor_account_id(),
                 near.into(),
                 env::current_account_id(),
                 NO_DEPOSIT,

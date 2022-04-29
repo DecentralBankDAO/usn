@@ -650,7 +650,7 @@ describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
     });
   });
 
-  it('should be balanced when USDT < USN', async () => {
+  it('should NOT be balanced when USDT < USN', async () => {
     // Bob buys USN.
     const amount = await global.bobContract.buy({
       args: {},
@@ -690,8 +690,13 @@ describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
       gas: GAS_FOR_CALL,
     });
 
+    // Nothing should happen.
     const poolInfo2 = await global.refContract.get_stable_pool({ pool_id: 1 });
-    assert.equal(poolInfo2.amounts[1] + '000000000000', poolInfo2.amounts[0]);
+    assert(
+      new BN(poolInfo.amounts[1] + '000000000000', 10).lt(
+        new BN(poolInfo.amounts[0], 10)
+      )
+    );
   });
 
   it('should be balanced when USDT > USN', async () => {

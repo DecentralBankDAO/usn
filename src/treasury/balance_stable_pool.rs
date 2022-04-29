@@ -49,9 +49,6 @@ trait RefFinanceHandler {
         #[callback] info: StablePoolInfo,
         #[callback] deposits: HashMap<AccountId, U128>,
     ) -> PromiseOrValue<()>;
-
-    #[private]
-    fn finish_balancing_with_burn(&mut self, amount: U128);
 }
 
 trait RefFinanceHandler {
@@ -61,8 +58,6 @@ trait RefFinanceHandler {
         info: StablePoolInfo,
         deposits: HashMap<AccountId, U128>,
     ) -> PromiseOrValue<()>;
-
-    fn finish_balancing_with_burn(&mut self, amount: U128);
 }
 
 #[near_bindgen]
@@ -191,65 +186,9 @@ impl RefFinanceHandler for Contract {
             } else {
                 add_liquidity.into()
             }
-        } else if usn > average {
-            // remove_liquidity -> withdraw -> burn.
-
-            // Mint.
-            let to_burn = usn - average;
-
-            let burn_amounts = info
-                .token_account_ids
-                .iter()
-                .map(|token| {
-                    if *token == usn_id {
-                        // Remove USN.
-                        U128::from(to_burn)
-                    } else {
-                        U128::from(0)
-                    }
-                })
-                .collect::<Vec<U128>>();
-
-            let max_burn_shares = info.shares_total_supply;
-
-            // Remove liquidity.
-            ext_ref_finance::remove_liquidity_by_tokens(
-                pool.id,
-                burn_amounts,
-                max_burn_shares,
-                pool.ref_id.clone(),
-                1,
-                GAS_FOR_REMOVE_LIQUIDITY,
-            )
-            // Withdraw.
-            .then(ext_ref_finance::withdraw(
-                usn_id.clone(),
-                to_burn.into(),
-                None,
-                pool.ref_id,
-                1,
-                GAS_FOR_WITHDRAW,
-            ))
-            // Burn.
-            .then(ext_self::finish_balancing_with_burn(
-                to_burn.into(),
-                usn_id,
-                NO_DEPOSIT,
-                GAS_FOR_FINISH_BURNING,
-            ))
-            .into()
         } else {
             // Do nothing.
             PromiseOrValue::Value(())
-        }
-    }
-
-    #[private]
-    fn finish_balancing_with_burn(&mut self, amount: U128) {
-        if is_promise_success() {
-            self.token
-                .internal_withdraw(&env::current_account_id(), amount.into());
-            event::emit::ft_burn(&env::current_account_id(), amount.into(), None);
         }
     }
 }

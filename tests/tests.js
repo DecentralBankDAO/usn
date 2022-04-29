@@ -476,7 +476,7 @@ describe('Fixed Spread', async function () {
 });
 
 describe('Stable Pool (USDT/USN) [pool_id: 0]', async function () {
-  this.timeout(17000);
+  this.timeout(19000);
 
   const MAX_TRANSFER_COST = '780000000000000000001';
 

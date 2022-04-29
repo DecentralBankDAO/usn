@@ -80,7 +80,6 @@ const refMethods = {
     'storage_deposit',
     'register_tokens',
     'add_stable_swap_pool',
-    'remove_liquidity_by_tokens',
   ],
 };
 

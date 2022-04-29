@@ -1,17 +1,19 @@
 [package]
 edition = "2018"
 name = "usn"
-version = "1.0.4"
+version = "1.0.5"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-near-contract-standards = "=4.0.0-pre.7"
-near-sdk = { version = "=4.0.0-pre.7", features = ["unstable"] }
-uint = { version = "=0.9.0", default-features = false }
-partial-min-max = "0.4.0"
 easy-ml = "1.8.1"
+getrandom = {version = "0.2", default-features = false, features = ["custom"]}
+near-contract-standards = "=4.0.0-pre.7"
+near-sdk = {version = "=4.0.0-pre.7", features = ["unstable"]}
+partial-min-max = "0.4.0"
+rand = {version = "0.8.5", default-features = false, features = ["std_rng"]}
+uint = {version = "=0.9.0", default-features = false}
 
 [profile.release]
 codegen-units = 1

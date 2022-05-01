@@ -62,7 +62,12 @@ impl std::fmt::Display for TreasuryDecision {
 #[near_bindgen]
 impl Contract {
     #[payable]
-    pub fn balance_treasury(&mut self, pool_id: u64, limits: Option<[u64; 2]>) -> Promise {
+    pub fn balance_treasury(
+        &mut self,
+        pool_id: u64,
+        limits: Option<[u64; 2]>,
+        execute: Option<bool>,
+    ) -> Promise {
         self.assert_owner_or_guardian();
 
         // Buy case: 2 yoctoNEAR, sell case: 3 yoctoNEAR.
@@ -113,6 +118,7 @@ impl Contract {
         .then(ext_self::handle_start_treasury_balancing(
             pool.id,
             decision_limit,
+            execute.unwrap_or(false),
             env::current_account_id(),
             env::attached_deposit(),
             GAS_SURPLUS * 6
@@ -141,6 +147,7 @@ trait SelfHandler {
         &mut self,
         pool_id: u64,
         decision_limit: Option<u64>,
+        execute: bool,
         #[callback] predicted_amounts: Vec<U128>,
         #[callback] info: StablePoolInfo,
     ) -> PromiseOrValue<()>;
@@ -173,6 +180,7 @@ trait SelfHandler {
         &mut self,
         pool_id: u64,
         decision_limit: Option<u64>,
+        execute: bool,
         predicted_amounts: Vec<U128>,
         info: StablePoolInfo,
     ) -> PromiseOrValue<()>;
@@ -229,6 +237,7 @@ impl SelfHandler for Contract {
         &mut self,
         pool_id: u64,
         decision_limit: Option<u64>,
+        execute: bool,
         #[callback] predicted_amounts: Vec<U128>,
         #[callback] info: StablePoolInfo,
     ) -> PromiseOrValue<()> {
@@ -261,7 +270,7 @@ impl SelfHandler for Contract {
 
         // Convert everything into floats.
         let near = near as f64 / ONE_NEAR as f64;
-        let usn = usn as f64 / 10f64.powi(USDT_DECIMALS as i32);
+        let usn = usn as f64 / 10f64.powi(USN_DECIMALS as i32);
         let last_exch_rate = *exchange_rates.last().unwrap();
         let usdt = usdt as f64 / 10f64.powi(USDT_DECIMALS as i32);
         let limit = decision_limit.map(|x| x as f64);
@@ -271,10 +280,15 @@ impl SelfHandler for Contract {
 
         env::log_str(format!("{}", decision).as_str());
 
-        match decision {
-            TreasuryDecision::DoNothing => PromiseOrValue::Value(()),
-            TreasuryDecision::Buy(f_amount) => buy(pool.id, f_amount, last_exch_rate).into(),
-            TreasuryDecision::Sell(f_amount) => sell(pool.id, f_amount, last_exch_rate).into(),
+        if execute {
+            match decision {
+                TreasuryDecision::DoNothing => PromiseOrValue::Value(()),
+                TreasuryDecision::Buy(f_amount) => buy(pool.id, f_amount, last_exch_rate).into(),
+                TreasuryDecision::Sell(f_amount) => sell(pool.id, f_amount, last_exch_rate).into(),
+            }
+        } else {
+            env::log_str("Execution bypassed");
+            PromiseOrValue::Value(())
         }
     }
 

@@ -776,18 +776,18 @@ describe('Balance treasury', async function () {
     await global.usnWnear.ft_transfer_call({
       args: {
         receiver_id: config.refId,
-        amount: '100000000000000000000000000',
+        amount: '1000000000000000000000000000',
         msg: '',
       },
       amount: ONE_YOCTO,
       gas: GAS_FOR_CALL,
     });
 
-    // Add liquidity to uniswap pool USDT-NEAR
+    // Add liquidity to uniswap pool NEAR-USDT
     await global.usnRef.add_liquidity({
       args: {
         pool_id: 2,
-        amounts: ['100000000000000000000000000', '10000000000'],
+        amounts: ['1000000000000000000000000000', '10000000000'],
         min_shares: '0',
       },
       amount: '780000000000000000000',
@@ -811,7 +811,7 @@ describe('Balance treasury', async function () {
     await global.usnContract.balance_treasury({
       args: {
         pool_id: 1,
-        limits: [10000, 200000],
+        limits: [1000, 2000],
         execute: true,
       },
       amount: 3 * ONE_YOCTO,

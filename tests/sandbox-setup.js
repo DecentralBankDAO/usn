@@ -200,7 +200,7 @@ async function sandboxSetup() {
     args: { account_id: config.refId, amount: '0' },
   });
   await wnearContract.mint({
-    args: { account_id: config.usnId, amount: '100000000000000000000000000' },
+    args: { account_id: config.usnId, amount: '1000000000000000000000000000' },
   });
 
   // Deploy Ref.Finance (ref-exchange) contract.

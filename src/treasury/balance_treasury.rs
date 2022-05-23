@@ -381,7 +381,7 @@ impl SelfHandler for Contract {
             for x in (1..9).rev() {
                 treasury
                     .cache
-                    .append(env::block_timestamp() - x * FIVE_MINUTES, x as f64 * 0.1);
+                    .append(env::block_timestamp() - x * FIVE_MINUTES, 10.);
             }
         }
         self.treasury.replace(&treasury);
@@ -460,7 +460,7 @@ fn sell(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
     let wrap_id = CONFIG.wrap_id.parse().unwrap();
     let pool = Pool::from_config_with_assert(pool_id);
     let min_amount =
-        ((amount * SWAP_SLIPPAGE / exchange_rate) * 10f64.powi(USN_DECIMALS as i32)) as u128;
+        ((amount * SWAP_SLIPPAGE / exchange_rate) * 10f64.powi(NEAR_DECIMALS as i32)) as u128;
 
     let remove_amounts: Vec<U128> = pool
         .decimals

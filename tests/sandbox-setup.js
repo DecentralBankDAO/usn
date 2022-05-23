@@ -2,17 +2,19 @@
 const nearAPI = require('near-api-js');
 const BN = require('bn.js');
 const fs = require('fs').promises;
-const isReachable = require('is-reachable');
+const portUsed = require('port-used');
 
 process.env.NEAR_NO_LOGS = 'defined';
 
 const config = {
   networkId: 'sandbox',
-  nodeUrl: 'http://0.0.0.0:3030',
+  domain: '0.0.0.0',
+  port: 3030,
   keyPath: '/tmp/near-usn-test-sandbox/validator_key.json',
   usnPath: './target/wasm32-unknown-unknown/sandbox/usn.wasm',
   usdtPath: './tests/test_token.wasm',
   refPath: './tests/ref_exchange.wasm',
+  wnearPath: './tests/wrap_token.wasm',
   priceoraclePath: './tests/price_oracle.wasm',
   priceoracleMultiplier: '111439',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
@@ -20,6 +22,7 @@ const config = {
   usnId: 'usn.test.near',
   usdtId: 'usdt.test.near',
   refId: 'ref.test.near',
+  wnearId: 'wrap.test.near',
   oracleId: 'priceoracle.test.near',
   aliceId: 'alice.test.near',
   bobId: 'bob.test.near',
@@ -61,6 +64,8 @@ const usnMethods = {
     'ft_transfer_call',
     'transfer_stable_liquidity',
     'balance_stable_pool',
+    'balance_treasury',
+    'warmup',
   ],
 };
 
@@ -74,19 +79,31 @@ const usdtMethods = {
 };
 
 const refMethods = {
-  viewMethods: ['get_stable_pool'],
+  viewMethods: ['get_stable_pool', 'get_pool_shares'],
   changeMethods: [
     'new',
     'storage_deposit',
-    'register_tokens',
     'add_stable_swap_pool',
+    'extend_whitelisted_tokens',
+    'add_stable_liquidity',
+    'add_simple_pool',
+    'add_liquidity'
   ],
 };
 
+const wnearMethods = {
+  changeMethods: ['new', 'mint', 'burn', 'near_deposit', 'near_withdraw', 'ft_transfer_call',],
+};
+
 async function sandboxSetup() {
-  if (!(await isReachable(config.nodeUrl))) {
-    throw new Error('Run sandbox first: `npm run sandbox`!');
-  }
+  portUsed.check(config.port, config.domain)
+    .then((inUse) => {
+      if (!inUse) {
+        throw new Error('Run sandbox first: `npm run sandbox:test`!');
+      }
+    }, (err) => {
+      console.error('Error on check:', err.message);
+    });
 
   const keyFile = require(config.keyPath);
   const privKey = nearAPI.utils.KeyPair.fromString(keyFile.secret_key);
@@ -100,7 +117,7 @@ async function sandboxSetup() {
       keyStore,
     },
     networkId: config.networkId,
-    nodeUrl: config.nodeUrl,
+    nodeUrl: 'http://' + config.domain + ':' + config.port,
   });
 
   // Setup a global test context before anything else failed.
@@ -112,12 +129,14 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.usnId, pubKey, config.amount);
   await masterAccount.createAccount(config.usdtId, pubKey, config.amount);
   await masterAccount.createAccount(config.refId, pubKey, config.amount);
+  await masterAccount.createAccount(config.wnearId, pubKey, config.amount);
   await masterAccount.createAccount(config.oracleId, pubKey, config.amount);
   await masterAccount.createAccount(config.aliceId, pubKey, config.amount);
   await masterAccount.createAccount(config.bobId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
   keyStore.setKey(config.networkId, config.usdtId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
+  keyStore.setKey(config.networkId, config.wnearId, privKey);
   keyStore.setKey(config.networkId, config.oracleId, privKey);
   keyStore.setKey(config.networkId, config.aliceId, privKey);
   keyStore.setKey(config.networkId, config.bobId, privKey);
@@ -149,13 +168,34 @@ async function sandboxSetup() {
   await usdtContract.new({ args: {} });
   // Register accounts in USDT contract to enable depositing.
   await usdtContract.mint({
-    args: { account_id: config.usdtId, amount: '10000000000000' }, // 10 mln. USDT treasury
+    args: { account_id: config.usdtId, amount: '10000000000000' },
   });
   await usdtContract.mint({
     args: { account_id: config.refId, amount: '0' },
   });
   await usdtContract.mint({
-    args: { account_id: config.usnId, amount: '0' },
+    args: { account_id: config.usnId, amount: '10000000000000' },
+  });
+
+  // Deploy WNEAR contract.
+  const wasmWnear = await fs.readFile(config.wnearPath);
+  const wnearAccount = new nearAPI.Account(near.connection, config.wnearId);
+  await wnearAccount.deployContract(wasmWnear);
+
+  // Initialize WNEAR contract.
+  const wnearContract = new nearAPI.Contract(
+    wnearAccount,
+    config.wnearId,
+    wnearMethods
+  );
+
+  await wnearContract.new({ args: {} });
+  // Register accounts in WNEAR contract to enable depositing.
+  await wnearContract.mint({
+    args: { account_id: config.refId, amount: '0' },
+  });
+  await wnearContract.mint({
+    args: { account_id: config.usnId, amount: '100000000000000000000000000' },
   });
 
   // Deploy Ref.Finance (ref-exchange) contract.
@@ -175,10 +215,7 @@ async function sandboxSetup() {
 
   const usnRef = new nearAPI.Contract(usnAccount, config.refId, refMethods);
   await usnRef.storage_deposit({ args: {}, amount: '10000000000000000000000' });
-  await usnRef.register_tokens({
-    args: { token_ids: [config.usdtId, config.usnId] },
-    amount: '1',
-  });
+
   // pool_id: 0
   await refContract.add_stable_swap_pool({
     args: {
@@ -198,6 +235,21 @@ async function sandboxSetup() {
       amp_factor: 240,
     },
     amount: '3540000000000000000000',
+  });
+  // pool_id: 2
+  await refContract.add_simple_pool({
+    args: {
+      tokens: [config.wnearId, config.usdtId],
+      fee: 25,
+    },
+    amount: '3550000000000000000000',
+  });
+
+  await refContract.extend_whitelisted_tokens({
+    args: {
+      tokens: [config.usdtId, config.wnearId, config.usnId]
+    },
+    amount: '1',
   });
 
   // Deploy the priceoracle contract.
@@ -239,17 +291,23 @@ async function sandboxSetup() {
     usnMethods
   );
   const bobUsdt = new nearAPI.Contract(bobAccount, config.usdtId, usdtMethods);
+  const usnUsdt = new nearAPI.Contract(usnAccount, config.usdtId, usdtMethods);
+  const usnWnear = new nearAPI.Contract(usnAccount, config.wnearId, wnearMethods);
 
   // Setup a global test context.
   global.usnAccount = usnAccount;
   global.usnContract = usnContract;
   global.usdtContract = usdtContract;
   global.refContract = refContract;
+  global.wnearContract = wnearContract;
   global.priceoracleContract = oracleContract;
   global.aliceAccount = aliceAccount;
   global.aliceContract = aliceContract;
   global.bobContract = bobContract;
   global.bobUsdt = bobUsdt;
+  global.usnUsdt = usnUsdt;
+  global.usnWnear = usnWnear;
+  global.usnRef = usnRef;
 }
 
 async function sandboxTeardown() {
@@ -270,7 +328,7 @@ module.exports = { config, sandboxSetup, sandboxTeardown };
 
 module.exports.mochaHooks = {
   beforeAll: async function () {
-    this.timeout(60000);
+    this.timeout(80000);
     await sandboxSetup();
   },
   afterAll: async function () {

@@ -1,5 +1,5 @@
 use easy_ml::matrices::Matrix;
-use near_sdk::{require, ONE_NEAR, ONE_YOCTO};
+use near_sdk::{require, Timestamp, ONE_NEAR, ONE_YOCTO};
 use partial_min_max::{max, min};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -33,7 +33,7 @@ const CONFIG: TreasuryConfig = if cfg!(feature = "mainnet") {
 } else {
     TreasuryConfig {
         wrap_id: "wrap.test.near",
-        swap_pool_id: 3,
+        swap_pool_id: 2,
     }
 };
 
@@ -368,7 +368,17 @@ impl SelfHandler for Contract {
         let mut treasury = self.treasury.take().unwrap();
         let rate: ExchangeRate = price.into();
         let rate = rate.multiplier() as f64 / 10f64.powi((rate.decimals() - NEAR_DECIMALS) as i32);
-        treasury.cache.append(env::block_timestamp(), rate);
+        const FIVE_MINUTES: Timestamp = 5 * 60 * 1000_000_000;
+
+        if cfg!(feature = "mainnet") || cfg!(feature = "testnet") {
+            treasury.cache.append(env::block_timestamp(), rate);
+        } else {
+            for x in (1..9).rev() {
+                treasury
+                    .cache
+                    .append(env::block_timestamp() - x * FIVE_MINUTES, x as f64 * 0.1);
+            }
+        }
         self.treasury.replace(&treasury);
     }
 

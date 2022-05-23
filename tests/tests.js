@@ -735,4 +735,98 @@ describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
     const poolInfo2 = await global.refContract.get_stable_pool({ pool_id: 1 });
     assert.equal(poolInfo2.amounts[1] + '000000000000', poolInfo2.amounts[0]);
   });
+  after(async () => {
+    await dao.set_owner({
+      args: { owner_id: config.usnId },
+    });
+  });
+});
+
+describe('Balance treasury', async function () {
+  this.timeout(50000);
+
+  const MAX_TRANSFER_COST = '780000000000000000001';
+
+  before(async () => {
+    // Fill up USN account with the USDT token: $1000000.
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '1000000000000' },
+      amount: '1',
+    });
+
+    // Add stable liquidity to the stable pool.
+    await global.usnContract.transfer_stable_liquidity({
+      args: { pool_id: 1, whole_amount: '1000000' },
+      amount: MAX_TRANSFER_COST,
+      gas: GAS_FOR_CALL,
+    });
+
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '10000000000' },
+      amount: '1',
+    });
+
+    await global.usnUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '10000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    await global.usnWnear.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '100000000000000000000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Add liquidity to uniswap pool USDT-NEAR
+    await global.usnRef.add_liquidity({
+      args: {
+        pool_id: 2,
+        amounts: ['100000000000000000000000000', '10000000000'],
+        min_shares: '0',
+      },
+      amount: '780000000000000000000',
+    });
+
+    // Warmup
+    await global.usnContract.warmup({
+      args: {},
+      gas: GAS_FOR_CALL,
+    });
+  });
+
+  it('should be balanced by itself', async () => {
+    const poolShareBefore = await global.refContract.get_pool_shares({
+      pool_id: 1,
+      account_id: config.usnId,
+    });
+    assert.equal(poolShareBefore, '4001968963282490744611320');
+
+    // Balancing the treasury
+    await global.usnContract.balance_treasury({
+      args: {
+        pool_id: 1,
+        limits: [10000, 200000],
+        execute: true
+      },
+      amount: 3 * ONE_YOCTO,
+      gas: '300000000000000',
+    });
+
+    const poolShareAfter = await global.refContract.get_pool_shares({
+      pool_id: 1,
+      account_id: config.usnId,
+    });
+    assert(new BN(poolShareAfter, 10).lt(
+      new BN(poolShareBefore, 10)
+    ));
+  });
 });

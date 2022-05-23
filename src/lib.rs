@@ -582,16 +582,7 @@ impl Contract {
     pub fn set_fixed_spread(&mut self, spread: U128) {
         self.assert_owner();
         let spread = Balance::from(spread);
-
-        if spread > MAX_SPREAD {
-            const PERCENT_MULTIPLICATOR: u128 = 100;
-
-            env::panic_str(&format!(
-                "Spread limit is {}%",
-                MAX_SPREAD * PERCENT_MULTIPLICATOR / 10u128.pow(SPREAD_DECIMAL as u32)
-            ));
-        }
-        self.spread = Spread::Fixed(spread);
+        self.spread = self.internal_set_fixed_spread(spread);
     }
 
     pub fn set_adaptive_spread(&mut self, params: Option<ExponentialSpreadParams>) {
@@ -601,26 +592,28 @@ impl Contract {
             None => Spread::Exponential(ExponentialSpreadParams::default()),
             Some(params) => {
                 let max_spread = MAX_SPREAD as f64 / 10u64.pow(SPREAD_DECIMAL as u32) as f64;
-                if params.max < params.min {
-                    env::panic_str("params.min cannot be greater than params.max");
+                if params.max == f64::NAN || params.min == f64::NAN || params.scaler == f64::NAN {
+                    env::panic_str("params.min, params.max, params.scaler cannot be a NAN value");
                 }
-                if params.min > max_spread {
-                    env::panic_str(&format!("params.min is greater than {}", max_spread));
-                }
-                if params.max > max_spread {
-                    env::panic_str(&format!("params.max is greater than {}", max_spread));
-                }
-                if params.scaler > SPREAD_MAX_SCALER {
-                    #[rustfmt::skip]
+                if params.max == params.min {
+                    let spread = params.min as u128;
+                    self.internal_set_fixed_spread(spread)
+                } else {
+                    if params.max < params.min {
+                        env::panic_str("params.min cannot be greater than params.max");
+                    }
+                    if params.max > max_spread {
+                        env::panic_str(&format!("params.max is greater than {}", max_spread));
+                    }
+                    if params.scaler > SPREAD_MAX_SCALER {
+                        #[rustfmt::skip]
                     env::panic_str(&format!("params.scaler is greater than {}", SPREAD_MAX_SCALER));
+                    }
+                    if params.min.is_sign_negative() || params.scaler.is_sign_negative() {
+                        env::panic_str("params.min, params.scaler cannot be negative");
+                    }
+                    Spread::Exponential(params)
                 }
-                if params.min.is_sign_negative()
-                    || params.max.is_sign_negative()
-                    || params.scaler.is_sign_negative()
-                {
-                    env::panic_str("params.min, params.max, params.scaler cannot be negative");
-                }
-                Spread::Exponential(params)
             }
         }
     }
@@ -698,6 +691,20 @@ pub fn upgrade() {
             (env::prepaid_gas() - env::used_gas() - UPDATE_GAS_LEFTOVER).0,
         );
         sys::promise_return(promise_id);
+    }
+}
+
+impl Contract {
+    pub fn internal_set_fixed_spread(&self, spread: u128) -> Spread {
+        if spread > MAX_SPREAD {
+            const PERCENT_MULTIPLICATOR: u128 = 100;
+
+            env::panic_str(&format!(
+                "Spread limit is {}%",
+                MAX_SPREAD * PERCENT_MULTIPLICATOR / 10u128.pow(SPREAD_DECIMAL as u32)
+            ));
+        }
+        Spread::Fixed(spread)
     }
 }
 

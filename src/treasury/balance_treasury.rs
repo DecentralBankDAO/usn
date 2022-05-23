@@ -15,12 +15,12 @@ const NEAR_DECIMALS: u8 = 24;
 // 50% slippage: minimizing chance to get failed but not too much.
 const SWAP_SLIPPAGE: f64 = 0.5;
 
-struct TreasuryConfig {
+pub struct TreasuryConfig {
     pub wrap_id: &'static str,
     pub swap_pool_id: u64,
 }
 
-const CONFIG: TreasuryConfig = if cfg!(feature = "mainnet") {
+pub const CONFIG: TreasuryConfig = if cfg!(feature = "mainnet") {
     TreasuryConfig {
         wrap_id: "wrap.near",
         swap_pool_id: 4,

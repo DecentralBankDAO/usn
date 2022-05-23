@@ -18,4 +18,6 @@ pub trait Ft {
 
     #[payable]
     fn near_withdraw(&mut self, amount: U128);
+
+    fn ft_balance_of(&self, account_id: AccountId) -> U128;
 }

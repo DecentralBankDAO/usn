@@ -100,6 +100,16 @@ impl Pool {
                 .map(move |decimals| extend_decimals(whole_amount, *decimals)),
         )
     }
+
+    pub fn pool() -> Self {
+        let pool_config = CONFIG.pools.first().unwrap();
+        Self {
+            ref_id: CONFIG.ref_address.parse().unwrap(),
+            id: pool_config.0,
+            tokens: pool_config.1.iter().map(|t| t.0.parse().unwrap()).collect(),
+            decimals: pool_config.1.iter().map(|t| t.1).collect(),
+        }
+    }
 }
 
 pub fn extend_decimals(whole: u128, decimals: u8) -> u128 {

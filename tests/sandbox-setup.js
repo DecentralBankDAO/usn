@@ -66,6 +66,7 @@ const usnMethods = {
     'balance_stable_pool',
     'balance_treasury',
     'warmup',
+    'refund'
   ],
 };
 
@@ -79,7 +80,7 @@ const usdtMethods = {
 };
 
 const refMethods = {
-  viewMethods: ['get_stable_pool', 'get_pool_shares'],
+  viewMethods: ['get_stable_pool', 'get_pool_shares', 'get_deposit'],
   changeMethods: [
     'new',
     'storage_deposit',
@@ -92,7 +93,8 @@ const refMethods = {
 };
 
 const wnearMethods = {
-  changeMethods: ['new', 'mint', 'burn', 'near_deposit', 'near_withdraw', 'ft_transfer_call',],
+  viewMethods: ['ft_balance_of'],
+  changeMethods: ['new', 'mint', 'burn', 'near_deposit', 'ft_transfer', 'near_withdraw', 'ft_transfer_call',],
 };
 
 async function sandboxSetup() {
@@ -191,6 +193,9 @@ async function sandboxSetup() {
 
   await wnearContract.new({ args: {} });
   // Register accounts in WNEAR contract to enable depositing.
+  await wnearContract.mint({
+    args: { account_id: config.wnearId, amount: '1000000000000000000000000' },
+  });
   await wnearContract.mint({
     args: { account_id: config.refId, amount: '0' },
   });
@@ -328,7 +333,7 @@ module.exports = { config, sandboxSetup, sandboxTeardown };
 
 module.exports.mochaHooks = {
   beforeAll: async function () {
-    this.timeout(80000);
+    this.timeout(70000);
     await sandboxSetup();
   },
   afterAll: async function () {

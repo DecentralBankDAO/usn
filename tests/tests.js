@@ -830,3 +830,225 @@ describe('Balance treasury', async function () {
     ));
   });
 });
+
+describe('Refund', async function () {
+  this.timeout(30000);
+
+  const MAX_TRANSFER_COST = '780000000000000000001';
+
+  before(async () => {
+    // Fill up USN account with the USDT token: $1000000.
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '1000000000000' },
+      amount: '1',
+    });
+
+    // Add stable liquidity to the stable pool.
+    await global.usnContract.transfer_stable_liquidity({
+      args: { pool_id: 0, whole_amount: '1000000' },
+      amount: MAX_TRANSFER_COST,
+      gas: GAS_FOR_CALL,
+    });
+
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '1000' },
+      amount: '1',
+    });
+
+    await global.usnUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '1000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    await global.wnearContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '100000000000000000000000' },
+      amount: '1',
+    });
+
+    await global.usnWnear.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '100000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+  });
+
+  it('should fail being called not by owner or guardian', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.refund({
+          args: {},
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(
+          err.message,
+          /This method can be called only by owner or guardian/
+        );
+        return true;
+      }
+    );
+  });
+
+  it('should handle refund', async () => {
+    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    assert(new BN(wrapAmountBefore, 10).gt(
+      new BN('0', 10)
+    ));
+    const nearAmountBefore = await global.usnAccount.state();
+
+    await global.usnContract.refund({
+      args: {},
+      amount: 3 * ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+    const nearAmountAfter = await global.usnAccount.state();
+
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    const wrapAmount = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
+    assert.equal(wrapAmount, '0');
+    // The result is less because of gas spent
+    assert(
+      new BN(nearAmountAfter.amount, 10).sub(new BN(nearAmountBefore.amount, 10)).lt(new BN('100000000000000000000000', 10)
+      ));
+  });
+
+  it('should handle refund without usdt deposit', async () => {
+    await global.wnearContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '100000000000000000000000' },
+      amount: '1',
+    });
+
+    await global.usnWnear.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '100000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const usdtDepositBefore = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wnearDepositBefore = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    assert.equal(usdtDepositBefore, '0');
+    assert.notEqual(wnearDepositBefore, '0');
+
+    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    assert(new BN(wrapAmountBefore, 10).gt(
+      new BN('0', 10)
+    ));
+    const nearAmountBefore = await global.usnAccount.state();
+
+    await global.usnContract.refund({
+      args: {},
+      amount: 3 * ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+    const nearAmountAfter = await global.usnAccount.state();
+
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    const wrapAmount = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
+    assert.equal(wrapAmount, '0');
+    // The result is less because of gas spent
+    assert(
+      new BN(nearAmountAfter.amount, 10).sub(new BN(nearAmountBefore.amount, 10)).lt(new BN('100000000000000000000000', 10)
+      ));
+  });
+
+  it('should handle refund without usdt and wnear deposit', async () => {
+    await global.wnearContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '100000000000000000000000' },
+      amount: '1',
+    });
+
+    const usdtDepositBefore = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wnearDepositBefore = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    assert.equal(usdtDepositBefore, '0');
+    assert.equal(wnearDepositBefore, '0');
+
+    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    assert(new BN(wrapAmountBefore, 10).gt(
+      new BN('0', 10)
+    ));
+    const nearAmountBefore = await global.usnAccount.state();
+
+    await global.usnContract.refund({
+      args: {},
+      amount: 3 * ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+    const nearAmountAfter = await global.usnAccount.state();
+
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    const wrapAmount = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
+    assert.equal(wrapAmount, '0');
+    // The result is less because of gas spent
+    assert(
+      new BN(nearAmountAfter.amount, 10).sub(new BN(nearAmountBefore.amount, 10)).lt(new BN('100000000000000000000000', 10)
+      ));
+  });
+});

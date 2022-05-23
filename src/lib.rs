@@ -269,7 +269,7 @@ impl Contract {
             decimals: USN_DECIMALS,
         };
 
-        let mut this = Self {
+        let this = Self {
             owner_id: owner_id.clone(),
             guardians: UnorderedSet::new(StorageKey::Guardians),
             token: FungibleTokenFreeStorage::new(StorageKey::Token),
@@ -282,7 +282,6 @@ impl Contract {
             treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),
         };
 
-        this.token.internal_deposit(&owner_id, NO_DEPOSIT);
         this
     }
 

@@ -51,12 +51,18 @@ impl Contract {
 
         let usn_id = env::current_account_id();
 
-        ext_ref_finance::get_deposits(
+        ext_ref_finance::get_stable_pool(
+            pool.id,
+            pool.ref_id.clone(),
+            NO_DEPOSIT,
+            GAS_FOR_GET_STABLE_POOL,
+        )
+        .and(ext_ref_finance::get_deposits(
             usn_id,
             pool.ref_id.clone(),
             NO_DEPOSIT,
             GAS_FOR_GET_DEPOSITS,
-        )
+        ))
         .then(ext_self::handle_start_transferring(
             pool.id,
             whole_amount,
@@ -79,6 +85,7 @@ trait RefFinanceHandler {
         &mut self,
         pool_id: u64,
         whole_amount: U128,
+        #[callback] info: StablePoolInfo,
         #[callback] deposits: HashMap<AccountId, U128>,
     ) -> Promise;
 
@@ -100,6 +107,7 @@ trait RefFinanceHandler {
         &mut self,
         pool_id: u64,
         whole_amount: U128,
+        info: StablePoolInfo,
         deposits: HashMap<AccountId, U128>,
     ) -> Promise;
 
@@ -121,9 +129,15 @@ impl RefFinanceHandler for Contract {
         &mut self,
         pool_id: u64,
         whole_amount: U128,
+        #[callback] info: StablePoolInfo,
         #[callback] deposits: HashMap<AccountId, U128>,
     ) -> Promise {
         let pool = Pool::from_config_with_assert(pool_id);
+
+        require!(
+            pool.tokens == info.token_account_ids,
+            "Wrong pool structure"
+        );
 
         let tokens = pool
             // Convert the whole decimal part to a full number for each token.

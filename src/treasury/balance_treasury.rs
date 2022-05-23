@@ -248,6 +248,11 @@ impl SelfHandler for Contract {
             "A pool of 2 tokens is required"
         );
 
+        require!(
+            pool.tokens == info.token_account_ids,
+            "Wrong pool structure"
+        );
+
         let treasury = self.treasury.get().expect("Valid treasury");
 
         // Prepare input data to make decision about balancing.

@@ -318,8 +318,7 @@ impl Contract {
 
     pub fn remove_from_blacklist(&mut self, account_id: &AccountId) {
         self.assert_owner();
-        self.black_list
-            .insert(account_id, &BlackListStatus::Allowable);
+        self.black_list.remove(account_id);
     }
 
     pub fn destroy_black_funds(&mut self, account_id: &AccountId) {
@@ -886,6 +885,11 @@ mod tests {
         assert_ne!(total_supply_before, contract.token.total_supply);
 
         assert_eq!(contract.ft_balance_of(accounts(2)), U128::from(0));
+
+        assert_eq!(
+            contract.blacklist_status(&accounts(2)),
+            BlackListStatus::Banned
+        );
     }
 
     #[test]

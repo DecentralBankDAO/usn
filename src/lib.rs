@@ -584,10 +584,13 @@ impl Contract {
     pub fn set_fixed_spread(&mut self, spread: U128) {
         self.assert_owner();
         let spread = Balance::from(spread);
+
         if spread > MAX_SPREAD {
+            const PERCENT_MULTIPLICATOR: u128 = 100;
+
             env::panic_str(&format!(
                 "Spread limit is {}%",
-                MAX_SPREAD / 10u128.pow(SPREAD_DECIMAL as u32)
+                MAX_SPREAD * PERCENT_MULTIPLICATOR / 10u128.pow(SPREAD_DECIMAL as u32)
             ));
         }
         self.spread = Spread::Fixed(spread);

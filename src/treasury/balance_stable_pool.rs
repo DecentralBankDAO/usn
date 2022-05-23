@@ -86,7 +86,7 @@ impl RefFinanceHandler for Contract {
                     if decimals < USN_DECIMALS {
                         extend_decimals(amount.into(), USN_DECIMALS - decimals)
                     } else if decimals > USN_DECIMALS {
-                        remove_decimals(amount.into(), decimals)
+                        remove_decimals(amount.into(), decimals - USN_DECIMALS)
                     } else {
                         amount.into()
                     }

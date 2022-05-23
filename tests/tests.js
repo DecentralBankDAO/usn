@@ -831,7 +831,7 @@ describe('Balance treasury', async function () {
   });
 });
 
-describe('Refund', async function () {
+describe('Refund treasury', async function () {
   this.timeout(30000);
 
   const MAX_TRANSFER_COST = '780000000000000000001';
@@ -884,7 +884,7 @@ describe('Refund', async function () {
   it('should fail being called not by owner or guardian', async () => {
     await assert.rejects(
       async () => {
-        await global.aliceContract.refund({
+        await global.aliceContract.refund_treasury({
           args: {},
           gas: GAS_FOR_CALL,
         });
@@ -908,7 +908,7 @@ describe('Refund', async function () {
     ));
     const nearAmountBefore = await global.usnAccount.state();
 
-    await global.usnContract.refund({
+    await global.usnContract.refund_treasury({
       args: {},
       amount: 3 * ONE_YOCTO,
       gas: GAS_FOR_CALL,
@@ -971,7 +971,7 @@ describe('Refund', async function () {
     ));
     const nearAmountBefore = await global.usnAccount.state();
 
-    await global.usnContract.refund({
+    await global.usnContract.refund_treasury({
       args: {},
       amount: 3 * ONE_YOCTO,
       gas: GAS_FOR_CALL,
@@ -1024,7 +1024,7 @@ describe('Refund', async function () {
     ));
     const nearAmountBefore = await global.usnAccount.state();
 
-    await global.usnContract.refund({
+    await global.usnContract.refund_treasury({
       args: {},
       amount: 3 * ONE_YOCTO,
       gas: GAS_FOR_CALL,

@@ -66,7 +66,7 @@ const usnMethods = {
     'balance_stable_pool',
     'balance_treasury',
     'warmup',
-    'refund'
+    'refund_treasury'
   ],
 };
 

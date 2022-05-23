@@ -10,7 +10,7 @@ use std::collections::HashMap;
 #[near_bindgen]
 impl Contract {
     #[payable]
-    pub fn refund(&mut self) -> PromiseOrValue<()> {
+    pub fn refund_treasury(&mut self) -> PromiseOrValue<()> {
         self.assert_owner_or_guardian();
 
         require!(

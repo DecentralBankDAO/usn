@@ -94,9 +94,6 @@ describe('Owner', function () {
 
   it('should be able to remove guardians', async () => {
     await assert.doesNotReject(async () => {
-      await global.usnContract.extend_guardians({
-        args: { guardians: [config.aliceId] },
-      });
       await global.usnContract.remove_guardians({
         args: { guardians: [config.aliceId] },
       });

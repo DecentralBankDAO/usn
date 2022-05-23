@@ -371,12 +371,13 @@ impl SelfHandler for Contract {
     #[private]
     fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData) {
         let mut treasury = self.treasury.take().unwrap();
-        let rate: ExchangeRate = price.into();
-        let rate = rate.multiplier() as f64 / 10f64.powi((rate.decimals() - NEAR_DECIMALS) as i32);
+        let exchange_rate: ExchangeRate = price.into();
+        let rate = exchange_rate.multiplier() as f64
+            / 10f64.powi((exchange_rate.decimals() - NEAR_DECIMALS) as i32);
         const FIVE_MINUTES: Timestamp = 5 * 60 * 1000_000_000;
 
         if cfg!(feature = "mainnet") || cfg!(feature = "testnet") {
-            treasury.cache.append(env::block_timestamp(), rate);
+            treasury.cache.append(exchange_rate.timestamp(), rate);
         } else {
             for x in (1..9).rev() {
                 treasury

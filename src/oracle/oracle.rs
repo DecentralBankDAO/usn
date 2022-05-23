@@ -46,6 +46,10 @@ impl ExchangeRate {
     pub fn decimals(&self) -> u8 {
         self.decimals
     }
+
+    pub fn timestamp(&self) -> Timestamp {
+        self.timestamp
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]

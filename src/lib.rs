@@ -618,6 +618,18 @@ impl Contract {
         }
     }
 
+    fn internal_set_fixed_spread(&self, spread: u128) -> Spread {
+        if spread > MAX_SPREAD {
+            const PERCENT_MULTIPLICATOR: u128 = 100;
+
+            env::panic_str(&format!(
+                "Spread limit is {}%",
+                MAX_SPREAD * PERCENT_MULTIPLICATOR / 10u128.pow(SPREAD_DECIMAL as u32)
+            ));
+        }
+        Spread::Fixed(spread)
+    }
+
     pub fn version(&self) -> String {
         format!("{}:{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
     }
@@ -691,20 +703,6 @@ pub fn upgrade() {
             (env::prepaid_gas() - env::used_gas() - UPDATE_GAS_LEFTOVER).0,
         );
         sys::promise_return(promise_id);
-    }
-}
-
-impl Contract {
-    pub fn internal_set_fixed_spread(&self, spread: u128) -> Spread {
-        if spread > MAX_SPREAD {
-            const PERCENT_MULTIPLICATOR: u128 = 100;
-
-            env::panic_str(&format!(
-                "Spread limit is {}%",
-                MAX_SPREAD * PERCENT_MULTIPLICATOR / 10u128.pow(SPREAD_DECIMAL as u32)
-            ));
-        }
-        Spread::Fixed(spread)
     }
 }
 

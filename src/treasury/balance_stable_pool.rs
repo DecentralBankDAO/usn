@@ -23,7 +23,7 @@ impl Contract {
 
         let pool = Pool::from_config_with_assert(pool_id);
 
-        ext_ref_finance::get_stable_pool(pool.id, pool.ref_id.clone(), 0, GAS_FOR_GET_DEPOSITS)
+        ext_ref_finance::get_stable_pool(pool.id, pool.ref_id.clone(), 0, GAS_FOR_GET_STABLE_POOL)
             .and(ext_ref_finance::get_deposits(
                 env::current_account_id(),
                 pool.ref_id,
@@ -34,7 +34,7 @@ impl Contract {
                 pool.id,
                 env::current_account_id(),
                 env::attached_deposit(),
-                GAS_FOR_FT_TRANSFER_CALL + GAS_FOR_WITHDRAW + GAS_FOR_FINISH_BURNING + GAS_SURPLUS,
+                GAS_FOR_FT_TRANSFER_CALL + GAS_FOR_ADD_LIQUIDITY + GAS_SURPLUS,
             ))
     }
 }

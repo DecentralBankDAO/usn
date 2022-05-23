@@ -328,7 +328,7 @@ impl SelfHandler for Contract {
             usn_amount,
             None,
             pool.ref_id,
-            1,
+            ONE_YOCTO,
             GAS_FOR_WITHDRAW,
         ))
         .then(ext_self::finish_withdraw_with_burn(

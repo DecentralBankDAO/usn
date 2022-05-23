@@ -18,7 +18,7 @@ impl Contract {
             "3 yoctoNEAR of attached deposit is required"
         );
 
-        let pool = Pool::pool();
+        let pool = Pool::stable_pool();
 
         ext_ref_finance::get_deposits(
             env::current_account_id(),
@@ -43,10 +43,7 @@ impl Contract {
 trait SelfHandler {
     #[private]
     #[payable]
-    fn handle_refund_to_pool(
-        &mut self,
-        #[callback] deposits: HashMap<AccountId, U128>,
-    ) -> PromiseOrValue<()>;
+    fn handle_refund_to_pool(&mut self, #[callback] deposits: HashMap<AccountId, U128>) -> Promise;
 
     #[private]
     #[payable]
@@ -58,7 +55,7 @@ trait SelfHandler {
 }
 
 trait SelfHandler {
-    fn handle_refund_to_pool(&mut self, deposits: HashMap<AccountId, U128>) -> PromiseOrValue<()>;
+    fn handle_refund_to_pool(&mut self, deposits: HashMap<AccountId, U128>) -> Promise;
 
     fn handle_refund_from_wnear(
         &mut self,
@@ -71,26 +68,17 @@ trait SelfHandler {
 impl SelfHandler for Contract {
     #[private]
     #[payable]
-    fn handle_refund_to_pool(
-        &mut self,
-        #[callback] deposits: HashMap<AccountId, U128>,
-    ) -> PromiseOrValue<()> {
-        let pool = Pool::pool();
-
+    fn handle_refund_to_pool(&mut self, #[callback] deposits: HashMap<AccountId, U128>) -> Promise {
         let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
-
-        let usdt_deposit = deposits
-            .get(&pool.tokens[1])
-            .unwrap_or(&U128::from(0u128))
-            .0;
         let wnear_deposit = deposits.get(&wrap_id).unwrap_or(&U128::from(0u128)).0;
 
-        let get_wnear_balance = ext_ft::ft_balance_of(
+        let wnear_balance = ext_ft::ft_balance_of(
             env::current_account_id(),
             wrap_id,
             NO_DEPOSIT,
             GAS_FOR_GET_BALANCE,
         );
+
         let refund_wnear = ext_self::handle_refund_from_wnear(
             wnear_deposit,
             env::current_account_id(),
@@ -98,27 +86,26 @@ impl SelfHandler for Contract {
             GAS_SURPLUS * 2 + GAS_FOR_WITHDRAW + GAS_FOR_NEAR_WITHDRAW,
         );
 
-        if usdt_deposit > 0 {
-            let mut add_amounts: Vec<U128> = Vec::new();
-            add_amounts.push(U128(0));
-            add_amounts.push(U128(usdt_deposit));
+        let stable_pool = Pool::stable_pool();
 
-            let min_shares = U128::from(0u128);
+        let add_amounts: Vec<U128> = stable_pool
+            .tokens
+            .iter()
+            .map(|token_id| *deposits.get(&token_id).unwrap_or(&U128::from(0u128)))
+            .collect();
 
-            ext_ref_finance::add_stable_liquidity(
-                pool.id,
-                add_amounts,
-                min_shares,
-                pool.ref_id.clone(),
-                ONE_YOCTO,
-                GAS_FOR_ADD_LIQUIDITY,
-            )
-            .then(get_wnear_balance)
-            .then(refund_wnear)
-            .into()
-        } else {
-            get_wnear_balance.then(refund_wnear).into()
-        }
+        let min_shares = U128::from(0u128);
+
+        let add_stable_liquidity = ext_ref_finance::add_stable_liquidity(
+            stable_pool.id,
+            add_amounts,
+            min_shares,
+            stable_pool.ref_id.clone(),
+            ONE_YOCTO,
+            GAS_FOR_ADD_LIQUIDITY,
+        );
+
+        add_stable_liquidity.then(wnear_balance).then(refund_wnear)
     }
 
     #[private]
@@ -128,7 +115,7 @@ impl SelfHandler for Contract {
         wnear_deposit: Balance,
         #[callback] wnear_balance: U128,
     ) -> PromiseOrValue<()> {
-        let pool = Pool::pool();
+        let stable_pool = Pool::stable_pool();
         let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
 
         let withdraw_wnear = ext_ft::near_withdraw(
@@ -143,7 +130,7 @@ impl SelfHandler for Contract {
                 wrap_id,
                 U128(wnear_deposit),
                 None,
-                pool.ref_id,
+                stable_pool.ref_id,
                 ONE_YOCTO,
                 GAS_FOR_WITHDRAW,
             )

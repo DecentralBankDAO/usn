@@ -101,7 +101,7 @@ impl Pool {
         )
     }
 
-    pub fn pool() -> Self {
+    pub fn stable_pool() -> Self {
         let pool_config = CONFIG.pools.first().unwrap();
         Self {
             ref_id: CONFIG.ref_address.parse().unwrap(),

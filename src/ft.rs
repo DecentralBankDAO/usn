@@ -218,16 +218,3 @@ impl FungibleTokenFreeStorage {
         (amount, 0)
     }
 }
-
-impl FungibleTokenResolver for FungibleTokenFreeStorage {
-    fn ft_resolve_transfer(
-        &mut self,
-        sender_id: AccountId,
-        receiver_id: AccountId,
-        amount: U128,
-    ) -> U128 {
-        self.internal_ft_resolve_transfer(&sender_id, receiver_id, amount)
-            .0
-            .into()
-    }
-}

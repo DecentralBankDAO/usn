@@ -173,9 +173,6 @@ trait ContractCallback {
 
     #[private]
     fn return_value(&mut self, value: U128) -> U128;
-
-    #[private]
-    fn handle_unregister(&mut self, account: AccountId);
 }
 
 trait ContractCallback {

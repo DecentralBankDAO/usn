@@ -15,6 +15,14 @@ pub struct CacheItem {
 }
 
 impl CacheItem {
+    pub fn new(timestamp: Timestamp, value: f64) -> Self {
+        CacheItem {
+            timestamp,
+            value,
+            n: 1,
+        }
+    }
+
     /// Returns an identifier of an interval which is 5 minutes long.
     pub fn time_slot(&self) -> u64 {
         self.timestamp / FIVE_MINUTES
@@ -49,6 +57,7 @@ impl Default for IntervalCache {
 pub enum CacheError {
     NotReady,
     Gaps,
+    NotRecent,
 }
 
 impl IntervalCache {
@@ -69,11 +78,7 @@ impl IntervalCache {
     /// effectively keeping a monotonic interval (~5 minutes) between cached values.
     ///
     pub fn append(&mut self, timestamp: Timestamp, value: f64) {
-        let mut new_item = CacheItem {
-            timestamp,
-            value,
-            n: 1,
-        };
+        let mut new_item = CacheItem::new(timestamp, value);
 
         if let Some(last_item) = self.items.last_mut() {
             if last_item.time_slot() == new_item.time_slot() {
@@ -105,6 +110,12 @@ impl IntervalCache {
         let mut y = Vec::<f64>::new();
 
         let mut fresh_time_slot = self.items.last().unwrap().time_slot();
+
+        let now_time_slot = CacheItem::new(now, 0.).time_slot();
+
+        if now_time_slot - fresh_time_slot > 1 {
+            return Result::Err(CacheError::NotRecent);
+        }
 
         for item in self.items.iter().rev() {
             if fresh_time_slot - item.time_slot() > 1 {
@@ -203,5 +214,7 @@ mod tests {
                 vec![6.5, 6.5, 6.5, 6.5, 6.5, 6.5, 6.5, 6.5]
             ))
         );
+
+        assert_eq!(cache.collect(9 * FIVE_MINUTES), Err(CacheError::NotRecent));
     }
 }

@@ -73,6 +73,42 @@ describe('Anyone', function () {
       },
     });
   });
+
+  it('should predict sell price', async () => {
+    const result = await global.aliceContract.predict_sell({
+      account: config.bobId,
+      amount: '10000000000000000000',
+      rate: {
+        multiplier: '61751',
+        decimals: 28,
+      },
+    });
+    assert.deepEqual(result, {
+      amount: '1611309938300594322359152',
+      commission: {
+        usn: '50000000000000000',
+        near: '8097034865832132273161',
+      },
+    });
+  });
+
+  it('should predict buy price', async () => {
+    const result = await global.aliceContract.predict_buy({
+      account: config.bobId,
+      amount: '10000000000000000000000000',
+      rate: {
+        multiplier: '61751',
+        decimals: 28,
+      },
+    });
+    assert.deepEqual(result, {
+      amount: '61442368502000000000',
+      commission: {
+        usn: '308631498000000000',
+        near: '49980000000000000000000',
+      },
+    });
+  });
 });
 
 describe('Owner', function () {
@@ -117,7 +153,9 @@ describe('Owner', function () {
 
   it('can change ownership', async () => {
     await assert.rejects(async () => {
-      await global.usnContract.propose_new_owner({ args: { owner_id: config.usnId } });
+      await global.usnContract.propose_new_owner({
+        args: { owner_id: config.usnId },
+      });
     });
   });
 

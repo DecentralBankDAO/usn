@@ -42,6 +42,8 @@ const usnMethods = {
     'commission',
     'guardians',
     'treasury',
+    'predict_buy',
+    'predict_sell',
   ],
   changeMethods: [
     'new',
@@ -72,7 +74,13 @@ const usnMethods = {
 };
 
 const oracleMethods = {
-  changeMethods: ['new', 'add_asset', 'add_oracle', 'report_prices'],
+  changeMethods: [
+    'new',
+    'add_asset',
+    'add_asset_ema',
+    'add_oracle',
+    'report_prices',
+  ],
 };
 
 const usdtMethods = {
@@ -291,11 +299,15 @@ async function sandboxSetup() {
   });
   await oracleContract.add_oracle({
     args: { account_id: config.oracleId },
-    amount: '1'
+    amount: '1',
   });
   await oracleContract.add_asset({
     args: { asset_id: 'wrap.test.near' },
-    amount: '1'
+    amount: '1',
+  });
+  await oracleContract.add_asset_ema({
+    args: { asset_id: 'wrap.test.near', period_sec: 3600 },
+    amount: '1',
   });
   await oracleContract.report_prices({
     args: {

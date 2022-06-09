@@ -1,6 +1,7 @@
 #![deny(warnings)]
 mod event;
 mod ft;
+mod history;
 mod oracle;
 mod owner;
 mod storage;
@@ -24,7 +25,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
-use oracle::{ExchangeRate, Oracle, PriceData};
+use history::{MinMaxRate, VolumeHistory};
+use oracle::{ExchangeRate, ExchangeRateValue, ExchangeRates, Oracle, PriceData};
+use partial_min_max;
 use treasury::TreasuryData;
 
 uint::construct_uint!(
@@ -107,6 +110,29 @@ impl From<Commission> for CommissionOutput {
     }
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ExchangeResult {
+    commission: Commission,
+    amount: Balance,
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ExchangeResultOutput {
+    commission: CommissionOutput,
+    amount: U128,
+}
+
+impl From<ExchangeResult> for ExchangeResultOutput {
+    fn from(result: ExchangeResult) -> Self {
+        Self {
+            commission: CommissionOutput::from(result.commission),
+            amount: U128::from(result.amount),
+        }
+    }
+}
+
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ExponentialSpreadParams {
@@ -145,6 +171,9 @@ pub struct Contract {
     spread: Spread,
     commission: Commission,
     treasury: LazyOption<TreasuryData>,
+    usn2near: VolumeHistory,
+    near2usn: VolumeHistory,
+    best_rate: MinMaxRate,
 }
 
 const DATA_IMAGE_SVG_NEAR_ICON: &str =
@@ -209,9 +238,9 @@ impl ContractCallback for Contract {
         expected: Option<ExpectedRate>,
         #[callback] price: PriceData,
     ) -> U128 {
-        let rate: ExchangeRate = price.into();
+        let rates: ExchangeRates = price.into();
 
-        self.finish_buy(account, near.0, expected, rate).into()
+        self.finish_buy(account, near.0, expected, rates).into()
     }
 
     #[private]
@@ -222,9 +251,9 @@ impl ContractCallback for Contract {
         expected: Option<ExpectedRate>,
         #[callback] price: PriceData,
     ) -> Promise {
-        let rate: ExchangeRate = price.into();
+        let rates: ExchangeRates = price.into();
 
-        let deposit = self.finish_sell(account.clone(), tokens.0, expected, rate);
+        let deposit = self.finish_sell(account.clone(), tokens.0, expected, rates);
 
         Promise::new(account)
             .transfer(deposit)
@@ -280,6 +309,9 @@ impl Contract {
             spread: Spread::Exponential(ExponentialSpreadParams::default()),
             commission: Commission::default(),
             treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),
+            usn2near: VolumeHistory::new(),
+            near2usn: VolumeHistory::new(),
+            best_rate: MinMaxRate::default(),
         };
 
         this
@@ -351,6 +383,206 @@ impl Contract {
         self.status = ContractStatus::Working;
     }
 
+    fn buy_price(&self, amount_near: u128, rates: &ExchangeRates) -> ExchangeRate {
+        let amount_near = U256::from(amount_near);
+        let five_min_near = U256::from(self.near2usn.five_min.sum_near());
+        let one_hour_near = U256::from(self.near2usn.one_hour.sum_near());
+        let one_hour_usn = U256::from(self.near2usn.one_hour.sum_usn());
+        let best_prev_rate = self
+            .best_rate
+            .min_previous()
+            .unwrap_or(ExchangeRateValue::from(rates.min()));
+        let default_decimals = best_prev_rate.decimals();
+
+        // Pn2u1h =if($VLMn2u1h>0,min(On2ubest(t-5m),$VLMn2u1h/VLMn2u1h), On2ubest(t-5m))
+        let price_1hour: ExchangeRateValue = if one_hour_usn > U256::zero() {
+            let multiplier = one_hour_usn
+                * U256::from(10u128.pow(u32::from(default_decimals - USN_DECIMALS)))
+                / one_hour_near;
+            let new_price = ExchangeRateValue::new(multiplier.as_u128(), default_decimals);
+
+            partial_min_max::min(new_price, best_prev_rate)
+        } else {
+            best_prev_rate
+        };
+
+        // On2ubest = min (ORACLE_smooth,ORACLE_current)
+        // Pn2u(t)=(VLMn2unow+VLMn2u5m)/(VLMn2unow+VLMn2u1h)*Pn2u1h +
+        //         (VLMn2u1h—VLMn2u5m)/(VLMn2unow+VLMn2u1h)*On2ubest
+        let near2usn_best_rate = rates.min();
+
+        let a = (amount_near + five_min_near) * U256::from(price_1hour.multiplier())
+            / (amount_near + one_hour_near);
+        let b = (one_hour_near - five_min_near) * U256::from(near2usn_best_rate.multiplier())
+            / (amount_near + one_hour_near);
+
+        let multiplier = a + b;
+        let price = ExchangeRate::new(multiplier.as_u128(), default_decimals);
+
+        price
+    }
+
+    fn sell_price(&self, amount_usn: u128, rates: &ExchangeRates) -> ExchangeRate {
+        let amount_usn = U256::from(amount_usn);
+        let five_min_usn = U256::from(self.usn2near.five_min.sum_usn());
+        let one_hour_usn = U256::from(self.usn2near.one_hour.sum_usn());
+        let one_hour_near = U256::from(self.usn2near.one_hour.sum_near());
+        let best_prev_rate = self
+            .best_rate
+            .max_previous()
+            .unwrap_or(ExchangeRateValue::from(rates.max()));
+        let default_decimals = best_prev_rate.decimals();
+
+        // Pu2n1h = if($VLMu2n1h>0,max(Ou2nbest(t-5m),$VLMu2n1h/VLMu2n1h), Ou2nbest(t-5m))
+        let price_1hour: ExchangeRateValue = if one_hour_usn > U256::zero() {
+            let multiplier = one_hour_usn
+                * U256::from(10u128.pow(u32::from(default_decimals - USN_DECIMALS)))
+                / one_hour_near;
+            let new_price = ExchangeRateValue::new(multiplier.as_u128(), default_decimals);
+
+            partial_min_max::max(new_price, best_prev_rate)
+        } else {
+            best_prev_rate
+        };
+
+        // Ou2nbest = max (ORACLE_smooth,ORACLE_current)
+        // Pu2n(t)=($VLMu2nnow+$VLMu2n5m)/($VLMu2nnow+$VLMu2n1h)*Pu2n1h +
+        //         ($VLMu2n1h—$VLMu2n5m)/($VLMu2nnow+$VLMu2n1h)*Ou2nbest
+        let usn2near_best_rate = rates.max();
+
+        let a = (amount_usn + five_min_usn) * U256::from(price_1hour.multiplier())
+            / (amount_usn + one_hour_usn);
+        let b = (one_hour_usn - five_min_usn) * U256::from(usn2near_best_rate.multiplier())
+            / (amount_usn + one_hour_usn);
+
+        let multiplier = a + b;
+        let price = ExchangeRate::new(multiplier.as_u128(), default_decimals);
+
+        price
+    }
+
+    fn calculate_commission(
+        &self,
+        account: &AccountId,
+        amount_usn: u128,
+        rate: &ExchangeRate,
+    ) -> Commission {
+        if *account == self.owner_id {
+            return Commission { usn: 0, near: 0 };
+        }
+        let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
+        let commission_usn =
+            U256::from(amount_usn) * U256::from(self.spread_u128(amount_usn)) / spread_denominator; // amount * 0.005
+        let commission_near = commission_usn
+            * U256::from(10u128.pow(u32::from(rate.decimals() - USN_DECIMALS)))
+            / rate.multiplier();
+
+        Commission {
+            usn: commission_usn.as_u128(),
+            near: commission_near.as_u128(),
+        }
+    }
+
+    pub fn predict_buy(
+        &self,
+        account: AccountId,
+        amount: U128,
+        rate: ExchangeRateValue,
+    ) -> ExchangeResultOutput {
+        let amount = u128::from(amount);
+        let rate = ExchangeRate::from(rate);
+
+        assert_ne!(amount, 0, "Amount can't be zero");
+        assert_ne!(rate.multiplier(), 0, "Multiplier can't be zero");
+        assert_ne!(rate.decimals(), 0, "Decimals can't be zero");
+
+        let rates = ExchangeRates::new(rate, rate);
+        let result = self.internal_predict_buy(&account, amount, &rates, None);
+
+        ExchangeResultOutput::from(result)
+    }
+
+    fn internal_predict_buy(
+        &self,
+        account: &AccountId,
+        amount: u128,
+        rates: &ExchangeRates,
+        expected: Option<ExpectedRate>,
+    ) -> ExchangeResult {
+        let near = U256::from(amount);
+
+        let rate = self.buy_price(amount, &rates);
+        if let Some(expected) = expected {
+            Self::assert_exchange_rate(&rate, &expected);
+        }
+
+        // Make exchange: NEAR -> USN.
+        let multiplier = U256::from(rate.multiplier());
+        let amount = near * multiplier / 10u128.pow(u32::from(rate.decimals() - USN_DECIMALS));
+
+        // Expected result (128-bit) can have 20 digits before and 18 after the decimal point.
+        // We don't expect more than 10^20 tokens on a single account. It panics if overflows.
+        let amount = amount.as_u128();
+
+        // Commission.
+        let commission = self.calculate_commission(account, amount, &rate);
+        let price_with_fee = amount - commission.usn;
+
+        ExchangeResult {
+            commission: commission,
+            amount: price_with_fee,
+        }
+    }
+
+    pub fn predict_sell(
+        &self,
+        account: AccountId,
+        amount: U128,
+        rate: ExchangeRateValue,
+    ) -> ExchangeResultOutput {
+        let amount = u128::from(amount);
+        let rate = ExchangeRate::from(rate);
+
+        assert_ne!(amount, 0, "Amount can't be zero");
+        assert_ne!(rate.multiplier(), 0, "Multiplier can't be zero");
+        assert_ne!(rate.decimals(), 0, "Decimals can't be zero");
+
+        let rates = ExchangeRates::new(rate, rate);
+        let result = self.internal_predict_sell(&account, amount, &rates, None);
+
+        ExchangeResultOutput::from(result)
+    }
+
+    fn internal_predict_sell(
+        &self,
+        account: &AccountId,
+        amount: u128,
+        rates: &ExchangeRates,
+        expected: Option<ExpectedRate>,
+    ) -> ExchangeResult {
+        let rate = self.sell_price(amount, &rates);
+
+        if let Some(expected) = expected {
+            Self::assert_exchange_rate(&rate, &expected);
+        }
+
+        let multiplier = U256::from(rate.multiplier());
+        let commission = self.calculate_commission(account, amount, &rate);
+
+        let amount: U256 = U256::from(amount) - commission.usn;
+
+        // Make exchange: USN -> NEAR.
+        let price_with_fee = (amount
+            * U256::from(10u128.pow(u32::from(rate.decimals() - USN_DECIMALS)))
+            / multiplier)
+            .as_u128();
+
+        ExchangeResult {
+            commission: commission,
+            amount: price_with_fee,
+        }
+    }
+
     /// Buys USN tokens for NEAR tokens.
     /// Can make cross-contract call to an oracle.
     /// Returns amount of purchased USN tokens.
@@ -395,47 +627,28 @@ impl Contract {
         account: AccountId,
         near: Balance,
         expected: Option<ExpectedRate>,
-        rate: ExchangeRate,
+        rates: ExchangeRates,
     ) -> Balance {
-        if let Some(expected) = expected {
-            Self::assert_exchange_rate(&rate, &expected);
-        }
+        self.best_rate.update(&rates, env::block_timestamp());
 
-        let near = U256::from(near);
-        let multiplier = U256::from(rate.multiplier());
+        let result = self.internal_predict_buy(&account, near, &rates, expected);
 
-        // Make exchange: NEAR -> USN.
-        let amount = near * multiplier / 10u128.pow(u32::from(rate.decimals() - USN_DECIMALS));
+        self.commission.usn += result.commission.usn;
+        self.commission.near += result.commission.near;
 
-        // Expected result (128-bit) can have 20 digits before and 18 after the decimal point.
-        // We don't expect more than 10^20 tokens on a single account. It panics if overflows.
-        let mut amount = amount.as_u128();
-
-        if account != self.owner_id {
-            // Commission.
-            let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
-            let commission_usn =
-                U256::from(amount) * U256::from(self.spread_u128(amount)) / spread_denominator; // amount * 0.005
-            let commission_near = commission_usn
-                * U256::from(10u128.pow(u32::from(rate.decimals() - USN_DECIMALS)))
-                / multiplier;
-
-            self.commission.usn += commission_usn.as_u128();
-            self.commission.near += commission_near.as_u128();
-
-            // The final amount is going to be less than u128 after removing commission
-            amount = (U256::from(amount) - commission_usn).as_u128(); // amount * 0.995
-        }
-
-        if amount == 0 {
+        if result.amount == 0 {
             env::panic_str("Not enough NEAR: attached deposit exchanges to 0 tokens");
         }
 
-        self.token.internal_deposit(&account, amount);
+        self.token.internal_deposit(&account, result.amount);
 
-        event::emit::ft_mint(&account, amount, None);
+        event::emit::ft_mint(&account, result.amount, None);
 
-        amount
+        let amount_usn_with_fee = result.amount + result.commission.usn;
+        self.near2usn
+            .add(amount_usn_with_fee, near, env::block_timestamp());
+
+        result.amount
     }
 
     /// Sells USN tokens getting NEAR tokens.
@@ -472,41 +685,24 @@ impl Contract {
         account: AccountId,
         amount: Balance,
         expected: Option<ExpectedRate>,
-        rate: ExchangeRate,
+        rates: ExchangeRates,
     ) -> Balance {
-        if let Some(expected) = expected {
-            Self::assert_exchange_rate(&rate, &expected);
-        }
+        self.best_rate.update(&rates, env::block_timestamp());
 
-        let mut sell_amount = U256::from(amount);
+        let result = self.internal_predict_sell(&account, amount, &rates, expected);
 
-        if account != self.owner_id {
-            // Commission.
-            let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
-            let commission_usn =
-                U256::from(amount) * U256::from(self.spread_u128(amount)) / spread_denominator;
-            let commission_near = commission_usn
-                * U256::from(10u128.pow(u32::from(rate.decimals() - USN_DECIMALS)))
-                / rate.multiplier();
-            self.commission.usn += commission_usn.as_u128();
-            self.commission.near += commission_near.as_u128();
-
-            sell_amount -= commission_usn;
-        }
-
-        // Make exchange: USN -> NEAR.
-        let deposit = sell_amount
-            * U256::from(10u128.pow(u32::from(rate.decimals() - USN_DECIMALS)))
-            / rate.multiplier();
-
-        // Here we don't expect too big deposit. Otherwise, panic.
-        let deposit = deposit.as_u128();
+        self.commission.usn += result.commission.usn;
+        self.commission.near += result.commission.near;
 
         self.token.internal_withdraw(&account, amount);
 
         event::emit::ft_burn(&account, amount, None);
 
-        deposit
+        let amount_near_with_fee = result.amount + result.commission.near;
+        self.usn2near
+            .add(amount, amount_near_with_fee, env::block_timestamp());
+
+        result.amount
     }
 
     fn assert_exchange_rate(actual: &ExchangeRate, expected: &ExpectedRate) {
@@ -695,6 +891,9 @@ impl Contract {
             spread: contract.spread,
             commission: contract.commission,
             treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),
+            usn2near: VolumeHistory::new(),
+            near2usn: VolumeHistory::new(),
+            best_rate: MinMaxRate::default(),
         }
     }
 
@@ -815,8 +1014,11 @@ impl FungibleTokenMetadataProvider for Contract {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    use history::{FIVE_MINUTES, ONE_MINUTE};
     use near_sdk::test_utils::{accounts, VMContextBuilder};
     use near_sdk::{testing_env, Balance, ONE_NEAR, ONE_YOCTO};
+
+    const ONE_USN: u128 = 1_000_000_000_000_000_000;
 
     use super::*;
 
@@ -1238,6 +1440,240 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_commission() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+        let contract = Contract::new(accounts(1));
+        testing_env!(context.predecessor_account_id(accounts(2)).build());
+
+        let fresh_rate = ExchangeRate::test_fresh_rate();
+        let result =
+            contract.calculate_commission(&accounts(2), 100000000000000000000, &fresh_rate);
+
+        assert_eq!(result.usn, 499700000000000000);
+        assert_eq!(result.near, 44840675167580470032932);
+    }
+
+    #[test]
+    fn test_calculate_commission_owner() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let contract = Contract::new(accounts(1));
+
+        let fresh_rate = ExchangeRate::test_fresh_rate();
+        let result =
+            contract.calculate_commission(&accounts(1), 100000000000000000000, &fresh_rate);
+
+        assert_eq!(result.usn, 0);
+        assert_eq!(result.near, 0);
+    }
+
+    #[test]
+    pub fn test_buy_sell_price() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        let current1 = ExchangeRate::test_create_rate(82004, 28);
+        let smooth1 = ExchangeRate::test_create_rate(82004, 28);
+        let rates = ExchangeRates::new(current1, smooth1);
+
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_234500000000000000000000, // 1.2345 NEAR
+                None,
+                rates.clone()
+            ),
+            10_123393800000000000 // 10.234 USN
+        );
+
+        let mut contract = Contract::new(accounts(1));
+
+        let fresh_rates = ExchangeRates::test_fresh_rate();
+        let expected_rate: ExpectedRate = fresh_rates.clone().current.into();
+
+        // History is empty
+        for n in 0..10 {
+            assert_eq!(
+                contract.finish_buy(
+                    accounts(1),
+                    1_000 * ONE_NEAR,
+                    Some(expected_rate.clone()),
+                    fresh_rates.clone()
+                ),
+                11143900000000000000000,
+                "interation is {}",
+                n
+            );
+        }
+        assert_eq!(contract.near2usn.one_hour.sum_near(), 1_000 * ONE_NEAR * 10);
+        assert_eq!(
+            contract.near2usn.one_hour.sum_usn(),
+            11143900000000000000000 * 10
+        );
+        assert_eq!(contract.near2usn.five_min.sum_near(), 1_000 * ONE_NEAR * 10);
+        assert_eq!(
+            contract.near2usn.five_min.sum_usn(),
+            11143900000000000000000 * 10
+        );
+
+        for n in 0..10 {
+            assert_eq!(
+                contract.finish_sell(
+                    accounts(1),
+                    1_000 * ONE_USN,
+                    Some(expected_rate.clone()),
+                    fresh_rates.clone()
+                ),
+                89735191450030958641050260,
+                "interation is {}",
+                n
+            );
+        }
+        assert_eq!(
+            contract.usn2near.one_hour.sum_near(),
+            89735191450030958641050260 * 10
+        );
+        assert_eq!(contract.usn2near.one_hour.sum_usn(), 1_000 * ONE_USN * 10);
+        assert_eq!(
+            contract.usn2near.five_min.sum_near(),
+            89735191450030958641050260 * 10
+        );
+        assert_eq!(contract.usn2near.five_min.sum_usn(), 1_000 * ONE_USN * 10);
+
+        // Change timestamp
+        testing_env!(context
+            .block_timestamp(env::block_timestamp() + FIVE_MINUTES + ONE_MINUTE)
+            .build());
+
+        // Test with updated history
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_000 * ONE_NEAR,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            11143900000000000000000
+        );
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_000 * ONE_NEAR,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            11143800000000000000000
+        );
+        assert_eq!(
+            contract.near2usn.one_hour.sum_near(),
+            2 * 1_000 * ONE_NEAR + 1_000 * ONE_NEAR * 10
+        );
+        assert_eq!(
+            contract.near2usn.one_hour.sum_usn(),
+            11143900000000000000000 + 11143800000000000000000 + 11143900000000000000000 * 10
+        );
+        assert_eq!(contract.near2usn.five_min.sum_near(), 2 * 1_000 * ONE_NEAR);
+        assert_eq!(
+            contract.near2usn.five_min.sum_usn(),
+            11143900000000000000000 + 11143800000000000000000
+        );
+
+        assert_eq!(
+            contract.finish_sell(
+                accounts(1),
+                1_000 * ONE_USN,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            89735191450030958641050260
+        );
+        assert_eq!(
+            contract.finish_sell(
+                accounts(1),
+                1_000 * ONE_USN,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            89735996697715321524076167
+        );
+        assert_eq!(
+            contract.usn2near.one_hour.sum_near(),
+            89735191450030958641050260 * 11 + 89735996697715321524076167
+        );
+        assert_eq!(contract.usn2near.one_hour.sum_usn(), 1_000 * ONE_USN * 12);
+        assert_eq!(
+            contract.usn2near.five_min.sum_near(),
+            89735191450030958641050260 + 89735996697715321524076167
+        );
+        assert_eq!(contract.usn2near.five_min.sum_usn(), 1_000 * ONE_USN * 2);
+
+        // Change timestamp
+        testing_env!(context
+            .block_timestamp(env::block_timestamp() + ONE_MINUTE + 1)
+            .build());
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_000 * ONE_NEAR,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            11143800000000000000000
+        );
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_000 * ONE_NEAR,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            11143800000000000000000
+        );
+
+        assert_eq!(
+            contract.finish_sell(
+                accounts(1),
+                1_000 * ONE_USN,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            89735996697715321524076167
+        );
+        assert_eq!(
+            contract.finish_sell(
+                accounts(1),
+                1_000 * ONE_USN,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            89735996697715321524076167
+        );
+
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_234500000000000000000000, // 1.2345 NEAR
+                None,
+                rates.clone()
+            ),
+            11_161731750000000000
+        );
+
+        assert_eq!(
+            contract.finish_sell(
+                accounts(1),
+                ONE_USN,
+                Some(expected_rate.clone()),
+                fresh_rates.clone()
+            ),
+            89735996697715321524076 // 0.0897
+        );
+    }
+
+    #[test]
     fn test_u256() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());
@@ -1246,15 +1682,15 @@ mod tests {
 
         testing_env!(context.predecessor_account_id(accounts(2)).build());
 
-        let fresh_rate = ExchangeRate::test_fresh_rate();
-        let expected_rate: ExpectedRate = fresh_rate.clone().into();
+        let fresh_rates = ExchangeRates::test_fresh_rate();
+        let expected_rate: ExpectedRate = fresh_rates.clone().current.into();
 
         assert_eq!(
             contract.finish_buy(
                 accounts(2),
                 1_000_000_000_000 * ONE_NEAR,
                 Some(expected_rate.clone()),
-                fresh_rate.clone(),
+                fresh_rates.clone(),
             ),
             11132756100000_000000000000000000
         );
@@ -1268,7 +1704,7 @@ mod tests {
                 accounts(2),
                 11088180500000_000000000000000000,
                 Some(expected_rate),
-                fresh_rate,
+                fresh_rates,
             ),
             994_005_000000000000000000000000000000
         );
@@ -1283,15 +1719,15 @@ mod tests {
 
         testing_env!(context.predecessor_account_id(accounts(1)).build());
 
-        let fresh_rate = ExchangeRate::test_fresh_rate();
-        let expected_rate: ExpectedRate = fresh_rate.clone().into();
+        let fresh_rates = ExchangeRates::test_fresh_rate();
+        let expected_rate: ExpectedRate = fresh_rates.clone().current.into();
 
         assert_eq!(
             contract.finish_buy(
                 accounts(1),
                 1_000_000_000_000 * ONE_NEAR,
                 Some(expected_rate.clone()),
-                fresh_rate.clone(),
+                fresh_rates.clone(),
             ),
             11143900000000_000000000000000000
         );
@@ -1305,7 +1741,7 @@ mod tests {
                 accounts(1),
                 11088180500000_000000000000000000,
                 Some(expected_rate),
-                fresh_rate,
+                fresh_rates,
             ),
             995_000_000000000000000000000000000000
         );
@@ -1320,14 +1756,14 @@ mod tests {
 
         testing_env!(context.predecessor_account_id(accounts(2)).build());
 
-        let fresh_rate = ExchangeRate::test_fresh_rate();
-        let expected_rate: ExpectedRate = fresh_rate.clone().into();
+        let fresh_rates = ExchangeRates::test_fresh_rate();
+        let expected_rate: ExpectedRate = fresh_rates.clone().current.into();
 
         contract.finish_buy(
             accounts(2),
             1 * ONE_NEAR,
             Some(expected_rate.clone()),
-            fresh_rate.clone(),
+            fresh_rates.clone(),
         );
         assert_eq!(contract.commission().usn, U128(55_719_500_000_000_000));
 
@@ -1340,7 +1776,7 @@ mod tests {
             accounts(2),
             1_000_000_000_000_000,
             Some(expected_rate.clone()),
-            fresh_rate,
+            fresh_rates,
         );
         assert_eq!(contract.commission().usn, U128(55_724_500_000_000_000));
 
@@ -1360,14 +1796,14 @@ mod tests {
 
         testing_env!(context.predecessor_account_id(accounts(2)).build());
 
-        let fresh_rate = ExchangeRate::test_fresh_rate();
-        let expected_rate: ExpectedRate = fresh_rate.clone().into();
+        let fresh_rates = ExchangeRates::test_fresh_rate();
+        let expected_rate: ExpectedRate = fresh_rates.clone().current.into();
 
         contract.finish_sell(
             accounts(2),
             11032461000000_000000000000000000,
             Some(expected_rate),
-            fresh_rate,
+            fresh_rates,
         );
     }
 }

@@ -17,9 +17,10 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     assert_one_yocto, env, ext_contract, is_promise_success, near_bindgen, sys, AccountId, Balance,
-    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseOrValue,
+    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseOrValue, Timestamp,
 };
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
@@ -646,8 +647,52 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        let contract: Self = env::state_read().expect("Contract is not initialized");
-        contract
+        #[derive(BorshDeserialize, BorshSerialize)]
+        pub struct OldContract {
+            owner_id: AccountId,
+            guardians: UnorderedSet<AccountId>,
+            token: FungibleTokenFreeStorage,
+            metadata: LazyOption<FungibleTokenMetadata>,
+            black_list: LookupMap<AccountId, BlackListStatus>,
+            status: ContractStatus,
+            oracle: Oracle,
+            spread: Spread,
+            commission: Commission,
+            treasury: LazyOption<OldTreasuryData>,
+        }
+
+        #[derive(BorshDeserialize, BorshSerialize)]
+        pub struct OldTreasuryData {
+            pub reserve: HashMap<AccountId, U128>,
+            pub cache: OldIntervalCache,
+        }
+
+        #[derive(BorshDeserialize, BorshSerialize)]
+        pub struct OldIntervalCache {
+            pub items: Vec<OldCacheItem>,
+        }
+
+        #[derive(BorshDeserialize, BorshSerialize)]
+        pub struct OldCacheItem {
+            pub timestamp: Timestamp,
+            pub value: f64,
+            pub n: u8,
+        }
+
+        let contract: OldContract = env::state_read().expect("Contract is not initialized");
+
+        Self {
+            owner_id: contract.owner_id,
+            guardians: contract.guardians,
+            token: contract.token,
+            metadata: contract.metadata,
+            black_list: contract.black_list,
+            status: contract.status,
+            oracle: contract.oracle,
+            spread: contract.spread,
+            commission: contract.commission,
+            treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),
+        }
     }
 
     fn abort_if_pause(&self) {

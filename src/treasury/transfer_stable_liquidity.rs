@@ -65,7 +65,6 @@ impl Contract {
             GAS_FOR_FT_TRANSFER_CALL * pool.tokens.len() as u64
                 + GAS_FOR_GET_DEPOSITS
                 + GAS_FOR_ADD_LIQUIDITY
-                + GAS_FOR_HANDLE_RESERVE
                 + GAS_SURPLUS * 3,
         ))
     }
@@ -90,9 +89,6 @@ trait RefFinanceHandler {
         whole_amount: U128,
         #[callback] deposits: HashMap<AccountId, U128>,
     );
-
-    #[private]
-    fn handle_reserve(&mut self, amounts: HashMap<AccountId, U128>);
 }
 
 trait RefFinanceHandler {
@@ -109,8 +105,6 @@ trait RefFinanceHandler {
         whole_amount: U128,
         deposits: HashMap<AccountId, U128>,
     );
-
-    fn handle_reserve(&mut self, amounts: HashMap<AccountId, U128>);
 }
 
 #[near_bindgen]
@@ -185,7 +179,7 @@ impl RefFinanceHandler for Contract {
             whole_amount,
             env::current_account_id(),
             env::attached_deposit() - ONE_YOCTO * (pool.tokens.len() as u128 - 1),
-            GAS_FOR_ADD_LIQUIDITY + GAS_SURPLUS * 2 + GAS_FOR_HANDLE_RESERVE,
+            GAS_FOR_ADD_LIQUIDITY + GAS_SURPLUS,
         );
 
         if let Some(transfers) = maybe_transfers {
@@ -225,30 +219,6 @@ impl RefFinanceHandler for Contract {
             env::attached_deposit(),
             GAS_FOR_ADD_LIQUIDITY,
         )
-        .as_return()
-        .then(ext_self::handle_reserve(
-            amounts
-                .map(|(token_id, amount)| (token_id.clone(), U128(amount)))
-                .collect::<HashMap<AccountId, U128>>(),
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_FOR_HANDLE_RESERVE,
-        ));
-    }
-
-    #[private]
-    fn handle_reserve(&mut self, amounts: HashMap<AccountId, U128>) {
-        let mut treasury = self.treasury.take().expect("Valid treasury");
-        for (account_id, amount) in amounts {
-            // Exclude the current token.
-            if account_id == env::current_account_id() {
-                continue;
-            }
-            let prev_amount = *treasury.reserve.get(&account_id).unwrap_or(&U128(0));
-            treasury
-                .reserve
-                .insert(account_id, U128(prev_amount.0 + amount.0));
-        }
-        self.treasury.replace(&treasury);
+        .as_return();
     }
 }

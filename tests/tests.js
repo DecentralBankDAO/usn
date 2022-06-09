@@ -68,7 +68,6 @@ describe('Anyone', function () {
   it('should get a treasury', async () => {
     const treasury = await global.aliceContract.treasury();
     assert.deepEqual(treasury, {
-      reserve: {},
       cache: {
         items: [],
       },

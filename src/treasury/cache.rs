@@ -2,15 +2,17 @@ use near_sdk::Timestamp;
 
 use crate::*;
 
-const MAX_CACHE_SIZE: usize = 8;
+const MAX_CACHE_SIZE: usize = 6;
 const FIVE_MINUTES: Timestamp = 5 * 60 * 1000_000_000;
+const ALFA_BASE: f64 = 0.3;
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 #[serde(crate = "near_sdk::serde")]
 pub struct CacheItem {
     pub timestamp: Timestamp,
     pub value: f64,
+    pub smoothed_value: f64,
     pub n: u8,
 }
 
@@ -19,6 +21,7 @@ impl CacheItem {
         CacheItem {
             timestamp,
             value,
+            smoothed_value: value,
             n: 1,
         }
     }
@@ -96,18 +99,33 @@ impl IntervalCache {
             self.items.push(new_item);
         }
 
+        if self.items.len() > 1 {
+            let last_item = self.items[self.items.len() - 2].clone();
+            let mut new_item = self.items.last_mut().unwrap();
+
+            // Get the distance between normalized time-steps
+            let time_distance = new_item.normalized_time(last_item.timestamp);
+
+            let alfa = ALFA_BASE.powf(1. / time_distance as f64);
+
+            // Make the exponential smoothing of exchange rates
+            new_item.smoothed_value =
+                last_item.smoothed_value * (1. - alfa) + new_item.value * alfa;
+        }
+
         if self.items.len() > MAX_CACHE_SIZE {
             self.items.remove(0);
         }
     }
 
-    pub fn collect(&self, now: Timestamp) -> Result<(Vec<f64>, Vec<f64>), CacheError> {
+    pub fn collect(&self, now: Timestamp) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), CacheError> {
         if self.items.len() < MAX_CACHE_SIZE {
             return Result::Err(CacheError::NotReady);
         }
 
         let mut x = Vec::<f64>::new();
         let mut y = Vec::<f64>::new();
+        let mut er = Vec::<f64>::new();
 
         let mut fresh_time_slot = self.items.last().unwrap().time_slot();
 
@@ -117,20 +135,23 @@ impl IntervalCache {
             return Result::Err(CacheError::NotRecent);
         }
 
+        // Define the algorithm parameters
         for item in self.items.iter().rev() {
             if fresh_time_slot - item.time_slot() > 1 {
                 return Result::Err(CacheError::Gaps);
             }
 
             x.push(item.normalized_time(now));
-            y.push(item.value);
+            y.push(item.smoothed_value);
+            er.push(item.value);
             fresh_time_slot = item.time_slot();
         }
 
         x.reverse();
         y.reverse();
+        er.reverse();
 
-        Result::Ok((x, y))
+        Result::Ok((x, y, er))
     }
 }
 
@@ -141,43 +162,71 @@ mod tests {
     #[test]
     fn test_cache_insert() {
         const ONE_MINUTE: u64 = FIVE_MINUTES / 5;
-        const RANDOM_NANO_SEC: u64 = 123456;
 
         let mut cache = IntervalCache::default();
 
-        cache.append(ONE_MINUTE, 7.2);
-        cache.append(4 * ONE_MINUTE, 6.9);
-        cache.append(6 * ONE_MINUTE, 7.1);
-        cache.append(9 * ONE_MINUTE + RANDOM_NANO_SEC, 7.4);
-        cache.append(10 * ONE_MINUTE, 7.9);
-        cache.append(13 * ONE_MINUTE, 8.1);
-        cache.append(14 * ONE_MINUTE, 7.8);
-        cache.append(17 * ONE_MINUTE, 7.5);
+        cache.append(7 * ONE_MINUTE, 3.085);
+        cache.append(11 * ONE_MINUTE, 5.234);
+        cache.append(12 * ONE_MINUTE, 5.011);
+        cache.append(17 * ONE_MINUTE, 6.656);
+        cache.append(21 * ONE_MINUTE, 6.813);
+        cache.append(22 * ONE_MINUTE, 7.613);
+        cache.append(23 * ONE_MINUTE, 8.141);
+        cache.append(30 * ONE_MINUTE, 9.518);
+        cache.append(35 * ONE_MINUTE, 10.813);
 
         assert_eq!(
             vec![
                 CacheItem {
-                    timestamp: 4 * ONE_MINUTE,
-                    value: (7.2 + 6.9) / 2.,
-                    n: 2,
+                    timestamp: 7 * ONE_MINUTE,
+                    value: 3.085,
+                    smoothed_value: 3.085,
+                    n: 1,
                 },
                 CacheItem {
-                    timestamp: 9 * ONE_MINUTE + RANDOM_NANO_SEC,
-                    value: (7.1 + 7.4) / 2.,
+                    timestamp: 12 * ONE_MINUTE,
+                    value: (5.011 + 5.234) / 2.,
+                    smoothed_value: 3.69625,
                     n: 2,
-                },
-                CacheItem {
-                    timestamp: 14 * ONE_MINUTE,
-                    value: (7.9 + 8.1 + 7.8) / 3.,
-                    n: 3,
                 },
                 CacheItem {
                     timestamp: 17 * ONE_MINUTE,
-                    value: 7.5,
+                    value: 6.656,
+                    smoothed_value: 4.584175,
+                    n: 1,
+                },
+                CacheItem {
+                    timestamp: 23 * ONE_MINUTE,
+                    value: (6.813 + 7.613 + 8.141) / 3.,
+                    smoothed_value: 5.661490498845394,
+                    n: 3,
+                },
+                CacheItem {
+                    timestamp: 30 * ONE_MINUTE,
+                    value: 9.518,
+                    smoothed_value: 7.293450791138676,
+                    n: 1,
+                },
+                CacheItem {
+                    timestamp: 35 * ONE_MINUTE,
+                    value: 10.813,
+                    smoothed_value: 8.349315553797073,
                     n: 1,
                 }
             ],
             cache.items
+        );
+
+        cache.append(42 * ONE_MINUTE, 12.046);
+
+        assert_eq!(
+            &CacheItem {
+                timestamp: 42 * ONE_MINUTE,
+                value: 12.046,
+                smoothed_value: 9.913642629235415,
+                n: 1,
+            },
+            cache.items.last().unwrap()
         );
     }
 
@@ -203,15 +252,19 @@ mod tests {
     fn test_cache_collect() {
         let mut cache = IntervalCache::default();
 
-        for i in 0..8 {
-            cache.append(i * FIVE_MINUTES, 6.5);
-        }
+        cache.append(FIVE_MINUTES, 3.085);
+        cache.append(2 * FIVE_MINUTES, 5.011);
+        cache.append(3 * FIVE_MINUTES, 6.656);
+        cache.append(4 * FIVE_MINUTES, 8.140);
+        cache.append(5 * FIVE_MINUTES, 9.518);
+        cache.append(6 * FIVE_MINUTES, 10.813);
 
         assert_eq!(
-            cache.collect(8 * FIVE_MINUTES),
+            cache.collect(7 * FIVE_MINUTES),
             Ok((
-                vec![-8.0, -7.0, -6.0, -5.0, -4.0, -3.0, -2.0, -1.0],
-                vec![6.5, 6.5, 6.5, 6.5, 6.5, 6.5, 6.5, 6.5]
+                vec![-6.0, -5.0, -4.0, -3.0, -2.0, -1.0],
+                vec![3.085, 3.6628, 4.56076, 5.634532, 6.7995724, 8.00360068],
+                vec![3.085, 5.011, 6.656, 8.140, 9.518, 10.813],
             ))
         );
 

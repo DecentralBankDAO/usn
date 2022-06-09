@@ -258,10 +258,13 @@ impl SelfHandler for Contract {
         // Prepare input data to make decision about balancing.
 
         // 1. NEAR/USDT exchange rates.
-        let (time_points, exchange_rates) = match treasury.cache.collect(env::block_timestamp()) {
-            Ok((time_points, exchange_rates)) => (time_points, exchange_rates),
-            Err(_) => env::panic_str("Treasury cache is not in a valid state."),
-        };
+        let (time_points, smoothed_rates, exchange_rates) =
+            match treasury.cache.collect(env::block_timestamp()) {
+                Ok((time_points, smoothed_rates, exchange_rates)) => {
+                    (time_points, smoothed_rates, exchange_rates)
+                }
+                Err(_) => env::panic_str("Treasury cache is not in a valid state."),
+            };
 
         // 2. NEAR part of USN reserve in NEAR.
         let near = env::account_balance() - env::attached_deposit();
@@ -281,7 +284,15 @@ impl SelfHandler for Contract {
         let limit = decision_limit.map(|x| x as f64);
 
         // Make a decision.
-        let decision = make_treasury_decision(exchange_rates, time_points, near, usn, usdt, limit);
+        let decision = make_treasury_decision(
+            exchange_rates,
+            smoothed_rates,
+            time_points,
+            near,
+            usn,
+            usdt,
+            limit,
+        );
 
         env::log_str(format!("{}", decision).as_str());
 
@@ -514,6 +525,7 @@ fn sell(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
 
 fn make_treasury_decision(
     exchange_rates: Vec<f64>,
+    smoothed_rates: Vec<f64>,
     time_points: Vec<f64>,
     near: f64,
     usn: f64,
@@ -538,18 +550,15 @@ fn make_treasury_decision(
     let u = usdt;
 
     debug_assert_eq!(exchange_rates.len(), time_points.len());
-    debug_assert_eq!(exchange_rates.len(), 8);
+    debug_assert_eq!(smoothed_rates.len(), time_points.len());
+    debug_assert_eq!(exchange_rates.len(), 6);
 
     // 2. Set NER = ER[t − 0] = V8
     let n_er = exchange_rates.last().unwrap();
 
-    // 3. Make the data smoothing with moving average
-    let mut x: Vec<f64> = Vec::new();
-    let mut y: Vec<f64> = Vec::new();
-    for k in 1..7 {
-        x.push((time_points[k - 1] + time_points[k] + time_points[k + 1]) / 3.);
-        y.push((exchange_rates[k - 1] + exchange_rates[k] + exchange_rates[k + 1]) / 3.);
-    }
+    // 3. Set the algorithm parameters
+    let x: Vec<f64> = time_points.clone();
+    let y: Vec<f64> = smoothed_rates.clone();
 
     // 4. Fit a quadratic trend into the 6 NEAR/USDT smoothed exchange rate values collected using OLS:
     let x: Matrix<f64> = Matrix::column(x);
@@ -636,8 +645,9 @@ mod tests {
     #[test]
     fn test_make_treasury_decision_sell() {
         let treasury_decision = make_treasury_decision(
-            vec![6.615, 6.62, 6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
-            vec![-7., -6., -5., -4., -3., -2., -1., -0.],
+            vec![6.628, 6.61133, 6.473, 6.65133, 6.52333, 6.69033],
+            vec![6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
+            vec![-5., -4., -3., -2., -1., 0.],
             191937460.53121,
             1241195491.76577,
             1367351872.04769,
@@ -646,34 +656,34 @@ mod tests {
 
         assert_eq!(
             treasury_decision,
-            TreasuryDecision::Sell(23604.588213058174)
+            TreasuryDecision::Sell(13697.189945199696)
         );
     }
 
     #[test]
     fn test_make_treasury_decision_sell_with_limit() {
         let treasury_decision = make_treasury_decision(
-            vec![6.615, 6.62, 6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
-            vec![-7., -6., -5., -4., -3., -2., -1., -0.],
+            vec![6.628, 6.61133, 6.473, 6.65133, 6.52333, 6.69033],
+            vec![6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
+            vec![-5., -4., -3., -2., -1., -0.],
             191937460.53121,
             1241195491.76577,
             1367351872.04769,
-            Some(20000.),
+            Some(10000.),
         );
 
-        assert_eq!(treasury_decision, TreasuryDecision::Sell(20000.));
+        assert_eq!(treasury_decision, TreasuryDecision::Sell(10000.));
     }
 
     #[test]
     fn test_make_treasury_decision_do_nothing() {
         let treasury_decision = make_treasury_decision(
-            vec![
-                5.9519, 5.9222, 5.9189, 5.9242, 5.9194, 5.9173, 5.8818, 5.8741,
-            ],
-            vec![-7., -6., -5., -4., -3., -2., -1., -0.],
+            vec![5.9519, 5.8529, 5.9112, 5.936566667, 5.9082, 5.9124],
+            vec![5.9519, 5.9222, 5.9189, 5.9242, 5.9194, 5.9173],
+            vec![-5., -4., -3., -2., -1., -0.],
             167242050.870139,
             1001497797.34406,
-            1000522964.94309,
+            1367351872.04769,
             None,
         );
 
@@ -683,16 +693,15 @@ mod tests {
     #[test]
     fn test_make_treasury_decision_buy() {
         let treasury_decision = make_treasury_decision(
-            vec![
-                5.6584, 5.809, 5.7635, 5.8331, 5.8555, 5.8643, 5.8565, 5.8699,
-            ],
-            vec![-7., -6., -5., -4., -3., -2., -1., -0.],
+            vec![5.74, 5.931522, 6.0333, 5.9366, 5.89, 5.79],
+            vec![5.74, 5.80, 5.87, 5.89, 5.89, 5.86],
+            vec![-5., -4., -3., -2., -1., -0.],
             167270746.338665,
             1001096736.9184,
             1000039562.72316,
             None,
         );
 
-        assert_eq!(treasury_decision, TreasuryDecision::Buy(207013.8891493543));
+        assert_eq!(treasury_decision, TreasuryDecision::Buy(18702.59662301328));
     }
 }

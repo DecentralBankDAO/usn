@@ -1,22 +1,5 @@
 use crate::*;
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct StablePoolInfo {
-    /// List of tokens in the pool.
-    pub token_account_ids: Vec<AccountId>,
-    pub decimals: Vec<u8>,
-    /// backend tokens.
-    pub amounts: Vec<U128>,
-    /// backend tokens in comparable precision
-    pub c_amounts: Vec<U128>,
-    /// Fee charged for swap.
-    pub total_fee: u32,
-    /// Total number of shares.
-    pub shares_total_supply: U128,
-    pub amp: u64,
-}
-
 /// Single swap action.
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -37,8 +20,6 @@ pub struct SwapAction {
 
 #[ext_contract(ext_ref_finance)]
 trait RefFinance {
-    fn get_stable_pool(&self, pool_id: u64) -> StablePoolInfo;
-
     fn get_deposits(&self, account_id: AccountId) -> HashMap<AccountId, U128>;
 
     fn get_pool_shares(&self, pool_id: u64, account_id: AccountId) -> U128;

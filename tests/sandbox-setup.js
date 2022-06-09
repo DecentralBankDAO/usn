@@ -282,9 +282,21 @@ async function sandboxSetup() {
     config.oracleId,
     oracleMethods
   );
-  await oracleContract.new({ args: { recency_duration_sec: 360 } });
-  await oracleContract.add_oracle({ args: { account_id: config.oracleId } });
-  await oracleContract.add_asset({ args: { asset_id: 'wrap.test.near' } });
+  await oracleContract.new({
+    args: {
+      recency_duration_sec: 360,
+      owner_id: config.oracleId,
+      near_claim_amount: '0',
+    },
+  });
+  await oracleContract.add_oracle({
+    args: { account_id: config.oracleId },
+    amount: '1'
+  });
+  await oracleContract.add_asset({
+    args: { asset_id: 'wrap.test.near' },
+    amount: '1'
+  });
   await oracleContract.report_prices({
     args: {
       prices: [

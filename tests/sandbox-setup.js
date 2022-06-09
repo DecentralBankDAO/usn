@@ -379,7 +379,7 @@ module.exports = { config, sandboxSetup, sandboxTeardown };
 
 module.exports.mochaHooks = {
   beforeAll: async function () {
-    this.timeout(70000);
+    this.timeout(80000);
     await sandboxSetup();
   },
   afterAll: async function () {

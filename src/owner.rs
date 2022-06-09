@@ -15,9 +15,15 @@ impl Contract {
         }
     }
 
-    pub fn set_owner(&mut self, owner_id: AccountId) {
+    pub fn propose_new_owner(&mut self, proposed_owner_id: AccountId) {
         self.assert_owner();
-        self.owner_id = owner_id;
+        self.proposed_owner_id = proposed_owner_id;
+    }
+
+    pub fn accept_ownership(&mut self) {
+        assert_ne!(self.owner_id, self.proposed_owner_id);
+        assert_eq!(env::predecessor_account_id(), self.proposed_owner_id);
+        self.owner_id = self.proposed_owner_id.clone();
     }
 
     pub fn owner(&self) -> AccountId {

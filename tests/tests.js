@@ -104,23 +104,33 @@ describe('Owner', function () {
   this.timeout(5000);
 
   before(async () => {
-    await global.usnContract.set_owner({
-      args: { owner_id: config.aliceId },
+    await global.usnContract.propose_new_owner({
+      args: { proposed_owner_id: config.aliceId },
+    });
+    assert.equal(await global.usnContract.owner(), config.usnId);
+
+    await global.aliceContract.accept_ownership({
+      args: {},
     });
     assert.equal(await global.usnContract.owner(), config.aliceId);
   });
 
   it('can change ownership', async () => {
     await assert.rejects(async () => {
-      await global.usnContract.set_owner({ args: { owner_id: config.usnId } });
+      await global.usnContract.propose_new_owner({ args: { owner_id: config.usnId } });
     });
   });
 
   after(async () => {
-    await global.aliceContract.set_owner({
-      args: { owner_id: config.usnId },
+    await global.aliceContract.propose_new_owner({
+      args: { proposed_owner_id: config.usnId },
     });
-    assert.equal(await global.aliceContract.owner(), config.usnId);
+    assert.equal(await global.usnContract.owner(), config.aliceId);
+
+    await global.usnContract.accept_ownership({
+      args: {},
+    });
+    assert.equal(await global.usnContract.owner(), config.usnId);
   });
 });
 
@@ -479,10 +489,14 @@ describe('Transfer Stable Liquidity [pool_id: 0]', async function () {
   var dao;
 
   before(async () => {
-    await global.usnContract.set_owner({
-      args: { owner_id: config.aliceId },
+    await global.usnContract.propose_new_owner({
+      args: { proposed_owner_id: config.aliceId },
     });
     dao = global.aliceContract;
+
+    await dao.accept_ownership({
+      args: {},
+    });
   });
 
   beforeEach(async () => {
@@ -606,8 +620,12 @@ describe('Transfer Stable Liquidity [pool_id: 0]', async function () {
   });
 
   after(async () => {
-    await dao.set_owner({
-      args: { owner_id: config.usnId },
+    await dao.propose_new_owner({
+      args: { proposed_owner_id: config.usnId },
+    });
+
+    await global.usnContract.accept_ownership({
+      args: {},
     });
   });
 });

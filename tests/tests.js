@@ -471,7 +471,7 @@ describe('Fixed Spread', async function () {
   });
 });
 
-describe('Stable Pool (USDT/USN) [pool_id: 0]', async function () {
+describe('Transfer Stable Liquidity [pool_id: 0]', async function () {
   this.timeout(19000);
 
   const MAX_TRANSFER_COST = '780000000000000000001';
@@ -612,160 +612,26 @@ describe('Stable Pool (USDT/USN) [pool_id: 0]', async function () {
   });
 });
 
-describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
-  this.timeout(20000);
-
-  const MAX_TRANSFER_COST = '780000000000000000001';
-
-  var dao;
-
-  before(async () => {
-    // Set up "DAO" account.
-    await global.usnContract.set_owner({
-      args: { owner_id: config.aliceId },
-    });
-    dao = global.aliceContract;
-
-    // Fill up USN account with the USDT token: $1000000.
-    await global.usdtContract.ft_transfer({
-      args: { receiver_id: config.usnId, amount: '1000000000000' },
-      amount: '1',
-    });
-
-    // Register Bob in the USDT contract.
-    // Otherwise, ref.finance won't finish a swap.
-    await usdtContract.mint({
-      args: { account_id: config.bobId, amount: '0' },
-    });
-
-    // Add stable liquidity to the stable pool.
-    await dao.transfer_stable_liquidity({
-      args: { pool_id: 1, whole_amount: '1000000' },
-      amount: MAX_TRANSFER_COST,
-      gas: GAS_FOR_CALL,
-    });
-  });
-
-  it('should NOT be balanced when USDT < USN', async () => {
-    // Bob buys USN.
-    const amount = await global.bobContract.buy({
-      args: {},
-      amount: ONE_NEAR,
-      gas: GAS_FOR_CALL,
-    });
-
-    // Bob swaps USN to USDT: BOB -> USN -> REF + ACTION.
-    await global.bobContract.ft_transfer_call({
-      args: {
-        receiver_id: config.refId,
-        amount: amount,
-        msg: '{"actions": [{"pool_id": 1, "token_in": "usn.test.near", "token_out": "usdt.test.near", "min_amount_out": "1"}]}',
-      },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    // Now, Bob has some USDT.
-    assert.notEqual(
-      '0',
-      await global.usdtContract.ft_balance_of({ account_id: config.bobId })
-    );
-
-    // And the pool is unbalanced.
-    const poolInfo = await global.refContract.get_stable_pool({ pool_id: 1 });
-    assert(
-      new BN(poolInfo.amounts[1] + '000000000000', 10).lt(
-        new BN(poolInfo.amounts[0], 10)
-      )
-    );
-
-    // Balancing the pool now.
-    await dao.balance_stable_pool({
-      args: { pool_id: 1 },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    // Nothing should happen.
-    const poolInfo2 = await global.refContract.get_stable_pool({ pool_id: 1 });
-    assert(
-      new BN(poolInfo.amounts[1] + '000000000000', 10).lt(
-        new BN(poolInfo.amounts[0], 10)
-      )
-    );
-  });
-
-  it('should be balanced when USDT > USN', async () => {
-    // Bob buys USDT.
-    await global.usdtContract.ft_transfer({
-      args: { receiver_id: config.bobId, amount: '1000000000' },
-      amount: '1',
-    });
-
-    // Bob swaps USDT to USN: BOB -> USDT -> REF + ACTION.
-    await global.bobUsdt.ft_transfer_call({
-      args: {
-        receiver_id: config.refId,
-        amount: '1000000000',
-        msg: '{"actions": [{"pool_id": 1, "token_in": "usdt.test.near", "token_out": "usn.test.near", "min_amount_out": "1"}]}',
-      },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    // The pool is unbalanced.
-    const poolInfo = await global.refContract.get_stable_pool({ pool_id: 1 });
-    assert(
-      new BN(poolInfo.amounts[1] + '000000000000', 10).gt(
-        new BN(poolInfo.c_amounts[0], 10)
-      )
-    );
-
-    // Balancing the pool now.
-    await dao.balance_stable_pool({
-      args: { pool_id: 1 },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    const poolInfo2 = await global.refContract.get_stable_pool({ pool_id: 1 });
-    assert.equal(poolInfo2.amounts[1] + '000000000000', poolInfo2.amounts[0]);
-  });
-  after(async () => {
-    await dao.set_owner({
-      args: { owner_id: config.usnId },
-    });
-  });
-});
-
-describe('Balance treasury', async function () {
+describe('Balance Treasury', async function () {
   this.timeout(50000);
 
-  const MAX_TRANSFER_COST = '780000000000000000001';
-
   before(async () => {
-    // Fill up USN account with the USDT token: $1000000.
+    // Add USDT token to 'usn' account: $1000000.
     await global.usdtContract.ft_transfer({
       args: { receiver_id: config.usnId, amount: '1000000000000' },
-      amount: '1',
+      amount: ONE_YOCTO,
     });
 
-    // Add stable liquidity to the stable pool.
-    await global.usnContract.transfer_stable_liquidity({
-      args: { pool_id: 1, whole_amount: '1000000' },
-      amount: MAX_TRANSFER_COST,
-      gas: GAS_FOR_CALL,
-    });
-
+    // USDT for a uniswap pool.
     await global.usdtContract.ft_transfer({
-      args: { receiver_id: config.usnId, amount: '10000000000' },
-      amount: '1',
+      args: { receiver_id: config.usnId, amount: '100000000000' },
+      amount: ONE_YOCTO,
     });
 
     await global.usnUsdt.ft_transfer_call({
       args: {
         receiver_id: config.refId,
-        amount: '10000000000',
+        amount: '100000000000',
         msg: '',
       },
       amount: ONE_YOCTO,
@@ -775,7 +641,7 @@ describe('Balance treasury', async function () {
     await global.usnWnear.ft_transfer_call({
       args: {
         receiver_id: config.refId,
-        amount: '1000000000000000000000000000',
+        amount: '10000000000000000000000000000',
         msg: '',
       },
       amount: ONE_YOCTO,
@@ -786,7 +652,7 @@ describe('Balance treasury', async function () {
     await global.usnRef.add_liquidity({
       args: {
         pool_id: 2,
-        amounts: ['1000000000000000000000000000', '10000000000'],
+        amounts: ['10000000000000000000000000000', '100000000000'],
         min_shares: '0',
       },
       amount: '780000000000000000000',
@@ -800,11 +666,9 @@ describe('Balance treasury', async function () {
   });
 
   it('should be balanced by itself', async () => {
-    const poolShareBefore = await global.refContract.get_pool_shares({
-      pool_id: 1,
+    const usdtBefore = await global.usdtContract.ft_balance_of({
       account_id: config.usnId,
     });
-    assert.equal(poolShareBefore, '4001968963282490744611320');
 
     // Balancing the treasury
     await global.usnContract.balance_treasury({
@@ -817,11 +681,11 @@ describe('Balance treasury', async function () {
       gas: '300000000000000',
     });
 
-    const poolShareAfter = await global.refContract.get_pool_shares({
-      pool_id: 1,
+    const usdtAfter = await global.usdtContract.ft_balance_of({
       account_id: config.usnId,
     });
-    assert(new BN(poolShareAfter, 10).lt(new BN(poolShareBefore, 10)));
+
+    assert(new BN(usdtAfter, 10).lt(new BN(usdtBefore, 10)));
   });
 });
 
@@ -1124,6 +988,185 @@ describe('Refund treasury', async function () {
       new BN(nearAmountAfter.amount, 10)
         .sub(new BN(nearAmountBefore.amount, 10))
         .gt(new BN('060000000000000000000000', 10))
+    );
+  });
+});
+
+describe('Exit Stable Pool', async function () {
+  this.timeout(30000);
+
+  const MAX_TRANSFER_COST = '780000000000000000001';
+
+  before(async () => {
+    // Fill up USN account with USDT token: $1000000.
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '1000000000000' },
+      amount: ONE_YOCTO,
+    });
+
+    // Add stable liquidity to a stable pool.
+    await global.usnContract.transfer_stable_liquidity({
+      args: { pool_id: 0, whole_amount: '1000000' },
+      amount: MAX_TRANSFER_COST,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Fill up Bob's account with USDT token: $1000
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.bobId, amount: '1000000000' },
+      amount: ONE_YOCTO,
+    });
+
+    // Fill up Bob's account with USN token: ~$1000
+    const usnAmount = await global.bobContract.buy({
+      args: {},
+      amount: ONE_NEAR + '00',
+      gas: GAS_FOR_CALL,
+    });
+
+    // Transfer Bob USDT to Ref.Finance.
+    await global.bobUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '1000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Transfer Bob USN to Ref.Finance.
+    await global.bobContract.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: usnAmount,
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Make a pool of 2 participants at least ('usn' and 'bob.test.near').
+    // This is needed to simulate liquidity removal by 'usn' only.
+    await global.bobRef.add_stable_liquidity({
+      args: {
+        pool_id: 0,
+        amounts: [usnAmount, '1000000000'],
+        min_shares: '0',
+      },
+      amount: '780000000000000000000',
+    });
+  });
+
+  it('should fail being called not by owner or guardian', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.exit_stable_pool({
+          args: {},
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should remove stable liquidity', async () => {
+    // Clear wNEAR 'usn' account.
+    await global.wnearContract.burn({
+      args: {
+        account_id: config.usnId,
+        amount: await global.wnearContract.ft_balance_of({
+          account_id: config.usnId,
+        }),
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(wrapAmountBefore, '0');
+
+    const usdtBefore = await global.usdtContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    const poolInfoBefore = await global.refContract.get_stable_pool({
+      pool_id: 0,
+    });
+
+    await global.usnContract.exit_stable_pool({
+      args: {},
+      amount: 3 * ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const poolInfoAfter = await global.refContract.get_stable_pool({
+      pool_id: 0,
+    });
+
+    const usdtAfter = await global.usdtContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    const usnDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usnId,
+    });
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    const wrapAmount = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(usnDeposit, '0');
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
+    assert.equal(wrapAmount, '0');
+
+    assert(
+      new BN(poolInfoBefore.amounts[0], 10).gt(
+        new BN(poolInfoAfter.amounts[0], 10)
+      )
+    );
+
+    assert(
+      new BN(poolInfoBefore.amounts[1], 10).gt(
+        new BN(poolInfoAfter.amounts[1], 10)
+      )
+    );
+
+    // Because the pool might be unbalanced, it removes a little bit more USN and less USDT.
+    // USN: after < before.
+    assert(
+      new BN(poolInfoBefore.amounts[0], 10)
+        .sub(new BN(poolInfoAfter.amounts[0], 10))
+        .gt(new BN('1000054000000000000000000', 10))
+    );
+
+    // USDT: after < before.
+    assert(
+      new BN(poolInfoBefore.amounts[1], 10)
+        .sub(new BN(poolInfoAfter.amounts[1], 10))
+        .gt(new BN('999945000000', 10))
+    );
+
+    // The same USDT amount gets back to the USDT contract.
+    // USDT: after > before.
+    assert(
+      new BN(usdtAfter, 10)
+        .sub(new BN(usdtBefore, 10))
+        .gt(new BN('999945000000', 10))
     );
   });
 });

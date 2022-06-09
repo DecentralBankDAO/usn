@@ -7,7 +7,7 @@ use crate::*;
 
 use super::ft::{ext_ft, REF_DEPOSIT_ACTION};
 use super::gas::*;
-use super::pool::{Pool, USDT_DECIMALS};
+use super::pool::{ref_id, USDT_DECIMALS};
 use super::ref_finance::*;
 
 const NEAR_DECIMALS: u8 = 24;
@@ -16,26 +16,42 @@ const NEAR_DECIMALS: u8 = 24;
 const SWAP_SLIPPAGE: f64 = 0.5;
 
 pub struct TreasuryConfig {
+    pub usdt_id: &'static str,
     pub wrap_id: &'static str,
     pub swap_pool_id: u64,
 }
 
 pub const CONFIG: TreasuryConfig = if cfg!(feature = "mainnet") {
     TreasuryConfig {
+        usdt_id: "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
         wrap_id: "wrap.near",
         swap_pool_id: 4,
     }
 } else if cfg!(feature = "testnet") {
     TreasuryConfig {
+        usdt_id: "usdt.fakes.testnet",
         wrap_id: "wrap.testnet",
         swap_pool_id: 34,
     }
 } else {
     TreasuryConfig {
+        usdt_id: "usdt.test.near",
         wrap_id: "wrap.test.near",
         swap_pool_id: 2,
     }
 };
+
+fn usdt_id() -> AccountId {
+    CONFIG.usdt_id.parse().unwrap()
+}
+
+fn wrap_id() -> AccountId {
+    CONFIG.wrap_id.parse().unwrap()
+}
+
+fn swap_pool_id() -> u64 {
+    CONFIG.swap_pool_id
+}
 
 #[derive(BorshDeserialize, BorshSerialize, Debug, Serialize, PartialEq, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -62,12 +78,7 @@ impl std::fmt::Display for TreasuryDecision {
 #[near_bindgen]
 impl Contract {
     #[payable]
-    pub fn balance_treasury(
-        &mut self,
-        pool_id: u64,
-        limits: Option<[u64; 2]>,
-        execute: Option<bool>,
-    ) -> Promise {
+    pub fn balance_treasury(&mut self, limits: Option<[u64; 2]>, execute: Option<bool>) -> Promise {
         self.assert_owner_or_guardian();
 
         // Buy case: 2 yoctoNEAR, sell case: 3 yoctoNEAR.
@@ -93,40 +104,23 @@ impl Contract {
             env::panic_str("Treasury cache is not warmed up. Use `warmup`.");
         }
 
-        let pool = Pool::from_config_with_assert(pool_id);
-
         // Start with figuring out USDT part of reserve.
-        ext_ref_finance::get_pool_shares(
-            pool.id,
+        ext_ft::ft_balance_of(
             env::current_account_id(),
-            pool.ref_id.clone(),
+            usdt_id(),
             NO_DEPOSIT,
-            GAS_FOR_GET_SHARES,
+            GAS_FOR_GET_BALANCE,
         )
-        .then(ext_self::predict_remove_liquidity(
-            pool.id,
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_SURPLUS + GAS_FOR_PREDICT_REMOVE_LIQUIDITY,
-        ))
-        .and(ext_ref_finance::get_stable_pool(
-            pool.id,
-            pool.ref_id,
-            NO_DEPOSIT,
-            GAS_FOR_GET_STABLE_POOL,
-        ))
         .then(ext_self::handle_start_treasury_balancing(
-            pool.id,
             decision_limit,
             execute.unwrap_or(false),
             env::current_account_id(),
             env::attached_deposit(),
-            GAS_SURPLUS * 6
-                + GAS_FOR_REMOVE_LIQUIDITY
+            GAS_SURPLUS * 5
+                + GAS_FOR_NEAR_DEPOSIT
+                + GAS_FOR_FT_TRANSFER_CALL
                 + GAS_FOR_SWAP
-                + GAS_FOR_WITHDRAW * 2
-                + GAS_FOR_NEAR_WITHDRAW
-                + GAS_FOR_FINISH_BURNING,
+                + GAS_FOR_WITHDRAW,
         ))
     }
 
@@ -145,88 +139,36 @@ trait SelfHandler {
     #[payable]
     fn handle_start_treasury_balancing(
         &mut self,
-        pool_id: u64,
         decision_limit: Option<u64>,
         execute: bool,
-        #[callback] predicted_amounts: Vec<U128>,
-        #[callback] info: StablePoolInfo,
+        #[callback] usdt_amount: U128,
     ) -> PromiseOrValue<()>;
 
     #[private]
     #[payable]
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usn_amount: U128,
-        #[callback] wrap_amount: U128,
-    ) -> Promise;
+    fn handle_withdraw_near(&mut self, #[callback] amount: U128) -> Promise;
 
     #[private]
     #[payable]
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise;
+    fn handle_withdraw_usdt(&mut self, #[callback] amount: U128) -> Promise;
 
     #[private]
     fn handle_exchange_rate_cache(&mut self, #[callback] price: PriceData);
-
-    #[private]
-    fn predict_remove_liquidity(&self, pool_id: u64, #[callback] shares: U128) -> Promise;
-
-    #[private]
-    fn finish_withdraw_with_burn(&mut self, amount: U128);
 }
 
 trait SelfHandler {
     fn handle_start_treasury_balancing(
         &mut self,
-        pool_id: u64,
         decision_limit: Option<u64>,
         execute: bool,
-        predicted_amounts: Vec<U128>,
-        info: StablePoolInfo,
+        usdt_amount: U128,
     ) -> PromiseOrValue<()>;
 
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usn_amount: U128,
-        wrap_amount: U128,
-    ) -> Promise;
+    fn handle_withdraw_near(&mut self, amount: U128) -> Promise;
 
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, amount: U128) -> Promise;
+    fn handle_withdraw_usdt(&mut self, amount: U128) -> Promise;
 
     fn handle_exchange_rate_cache(&mut self, price: PriceData);
-
-    fn predict_remove_liquidity(&self, pool_id: u64, shares: U128) -> Promise;
-
-    fn finish_withdraw_with_burn(&mut self, amount: U128);
-}
-
-enum Extract {
-    Usn,
-    Other,
-}
-
-fn extract_amount(pool: &Pool, amounts: &Vec<U128>, extract: Extract) -> U128 {
-    pool.tokens
-        .iter()
-        .zip(amounts)
-        .find_map(|(token_id, amount)| match extract {
-            Extract::Usn => {
-                if token_id == &env::current_account_id() {
-                    Some(amount.clone())
-                } else {
-                    None
-                }
-            }
-            _ => {
-                if token_id != &env::current_account_id() {
-                    Some(amount.clone())
-                } else {
-                    None
-                }
-            }
-        })
-        .unwrap()
 }
 
 #[near_bindgen]
@@ -235,24 +177,10 @@ impl SelfHandler for Contract {
     #[payable]
     fn handle_start_treasury_balancing(
         &mut self,
-        pool_id: u64,
         decision_limit: Option<u64>,
         execute: bool,
-        #[callback] predicted_amounts: Vec<U128>,
-        #[callback] info: StablePoolInfo,
+        #[callback] usdt_amount: U128,
     ) -> PromiseOrValue<()> {
-        let pool = Pool::from_config_with_assert(pool_id);
-
-        require!(
-            predicted_amounts.len() == 2,
-            "A pool of 2 tokens is required"
-        );
-
-        require!(
-            pool.tokens == info.token_account_ids,
-            "Wrong pool structure"
-        );
-
         let treasury = self.treasury.get().expect("Valid treasury");
 
         // Prepare input data to make decision about balancing.
@@ -270,11 +198,12 @@ impl SelfHandler for Contract {
         let near = env::account_balance() - env::attached_deposit();
 
         // 3. Total value of circulating USN.
-        let usn =
-            self.token.ft_total_supply().0 - extract_amount(&pool, &info.amounts, Extract::Usn).0;
+        let usn = self.token.ft_total_supply().0;
 
         // 4. USDT reserve.
-        let usdt = extract_amount(&pool, &predicted_amounts, Extract::Other).0;
+        let usdt = usdt_amount.0;
+
+        env::log_str(format!("NEAR: {}, USN: {}, USDT: {}", near, usn, usdt).as_str());
 
         // Convert everything into floats.
         let near = near as f64 / ONE_NEAR as f64;
@@ -299,8 +228,8 @@ impl SelfHandler for Contract {
         if execute {
             match decision {
                 TreasuryDecision::DoNothing => PromiseOrValue::Value(()),
-                TreasuryDecision::Buy(f_amount) => buy(pool.id, f_amount, last_exch_rate).into(),
-                TreasuryDecision::Sell(f_amount) => sell(pool.id, f_amount, last_exch_rate).into(),
+                TreasuryDecision::Buy(f_amount) => buy(f_amount, last_exch_rate).into(),
+                TreasuryDecision::Sell(f_amount) => sell(f_amount, last_exch_rate).into(),
             }
         } else {
             env::log_str("Execution bypassed");
@@ -310,72 +239,33 @@ impl SelfHandler for Contract {
 
     #[private]
     #[payable]
-    fn handle_withdraw_after_swap(
-        &mut self,
-        pool_id: u64,
-        usn_amount: U128,
-        #[callback] wrap_amount: U128,
-    ) -> Promise {
-        let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
-        let usn_id = env::current_account_id();
-        let pool = Pool::from_config_with_assert(pool_id);
-
+    fn handle_withdraw_near(&mut self, #[callback] amount: U128) -> Promise {
         ext_ref_finance::withdraw(
-            wrap_id.clone(),
-            wrap_amount,
+            wrap_id(),
+            amount,
             None,
-            pool.ref_id.clone(),
+            ref_id(),
             ONE_YOCTO,
             GAS_FOR_WITHDRAW,
         )
         .then(ext_ft::near_withdraw(
-            wrap_amount,
-            wrap_id,
+            amount,
+            wrap_id(),
             ONE_YOCTO,
             GAS_FOR_NEAR_WITHDRAW,
-        ))
-        .then(ext_ref_finance::withdraw(
-            usn_id.clone(),
-            usn_amount,
-            None,
-            pool.ref_id,
-            ONE_YOCTO,
-            GAS_FOR_WITHDRAW,
-        ))
-        .then(ext_self::finish_withdraw_with_burn(
-            usn_amount,
-            usn_id,
-            NO_DEPOSIT,
-            GAS_FOR_FINISH_BURNING,
         ))
     }
 
     #[private]
     #[payable]
-    fn handle_liquidity_after_swap(&mut self, pool_id: u64, #[callback] amount: U128) -> Promise {
-        let pool = Pool::from_config_with_assert(pool_id);
-
-        let add_amounts = pool
-            .tokens
-            .iter()
-            .map(|token_id| {
-                if token_id == &env::current_account_id() {
-                    U128(0u128)
-                } else {
-                    amount
-                }
-            })
-            .collect();
-
-        let min_shares = U128::from(0u128);
-
-        ext_ref_finance::add_stable_liquidity(
-            pool.id,
-            add_amounts,
-            min_shares,
-            pool.ref_id,
+    fn handle_withdraw_usdt(&mut self, #[callback] amount: U128) -> Promise {
+        ext_ref_finance::withdraw(
+            usdt_id(),
+            amount,
+            None,
+            ref_id(),
             ONE_YOCTO,
-            GAS_FOR_ADD_LIQUIDITY,
+            GAS_FOR_WITHDRAW,
         )
     }
 
@@ -398,128 +288,79 @@ impl SelfHandler for Contract {
         }
         self.treasury.replace(&treasury);
     }
-
-    #[private]
-    fn predict_remove_liquidity(&self, pool_id: u64, #[callback] shares: U128) -> Promise {
-        let pool = Pool::from_config_with_assert(pool_id);
-        ext_ref_finance::predict_remove_liquidity(
-            pool.id,
-            shares,
-            pool.ref_id,
-            NO_DEPOSIT,
-            GAS_FOR_PREDICT_REMOVE_LIQUIDITY,
-        )
-    }
-
-    #[private]
-    fn finish_withdraw_with_burn(&mut self, amount: U128) {
-        if is_promise_success() {
-            self.token
-                .internal_withdraw(&env::current_account_id(), amount.into());
-            event::emit::ft_burn(&env::current_account_id(), amount.into(), None);
-        }
-    }
 }
 
-fn buy(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
-    let wrap_id: AccountId = CONFIG.wrap_id.parse().unwrap();
-    let pool = Pool::from_config_with_assert(pool_id);
-    let near = ((amount / exchange_rate) * ONE_NEAR as f64) as u128;
+fn buy(amount: f64, exchange_rate: f64) -> Promise {
+    let near_amount = ((amount / exchange_rate) * ONE_NEAR as f64) as u128;
     let min_amount = (amount * SWAP_SLIPPAGE * 10f64.powi(USDT_DECIMALS as i32)) as u128;
 
-    env::log_str(&format!("Trying to wrap {} NEAR", near));
-
-    let usdt_name = pool
-        .tokens
-        .iter()
-        .find(|&token_id| token_id != &env::current_account_id())
-        .unwrap();
+    env::log_str(&format!("Trying to wrap {} NEAR", near_amount));
 
     let swap_action = SwapAction {
-        pool_id: CONFIG.swap_pool_id,
-        amount_in: Some(near.into()),
-        token_in: wrap_id.clone(),
-        token_out: usdt_name.clone(),
+        pool_id: swap_pool_id(),
+        amount_in: Some(near_amount.into()),
+        token_in: wrap_id(),
+        token_out: usdt_id(),
         min_amount_out: U128(min_amount),
     };
 
-    ext_ft::near_deposit(wrap_id.clone(), near, GAS_FOR_NEAR_DEPOSIT)
+    ext_ft::near_deposit(wrap_id(), near_amount, GAS_FOR_NEAR_DEPOSIT)
         .then(ext_ft::ft_transfer_call(
-            pool.ref_id.clone(),
-            near.into(),
+            ref_id(),
+            near_amount.into(),
             None,
             REF_DEPOSIT_ACTION.into(),
-            wrap_id,
+            wrap_id(),
             ONE_YOCTO,
             GAS_FOR_FT_TRANSFER_CALL,
         ))
         .then(ext_ref_finance::swap(
             vec![swap_action],
             None,
-            pool.ref_id.clone(),
+            ref_id(),
             NO_DEPOSIT,
             GAS_FOR_SWAP,
         ))
-        .then(ext_self::handle_liquidity_after_swap(
-            pool.id,
+        .then(ext_self::handle_withdraw_usdt(
             env::current_account_id(),
             ONE_YOCTO,
-            GAS_SURPLUS + GAS_FOR_ADD_LIQUIDITY,
+            GAS_SURPLUS + GAS_FOR_WITHDRAW,
         ))
 }
 
-fn sell(pool_id: u64, amount: f64, exchange_rate: f64) -> Promise {
-    let wrap_id = CONFIG.wrap_id.parse().unwrap();
-    let pool = Pool::from_config_with_assert(pool_id);
+fn sell(amount: f64, exchange_rate: f64) -> Promise {
+    let usdt_amount = U128((amount * 10f64.powi(USDT_DECIMALS as i32)) as u128);
     let min_amount =
         ((amount * SWAP_SLIPPAGE / exchange_rate) * 10f64.powi(NEAR_DECIMALS as i32)) as u128;
-
-    let remove_amounts: Vec<U128> = pool
-        .decimals
-        .iter()
-        .map(|decimals| U128((amount * 10f64.powi(*decimals as i32)) as u128))
-        .collect();
-
-    let usn_amount = extract_amount(&pool, &remove_amounts, Extract::Usn);
-
-    let (usdt_name, usdt_amount) = pool
-        .tokens
-        .into_iter()
-        .zip(remove_amounts.clone().into_iter())
-        .find(|(token_id, _amount)| token_id != &env::current_account_id())
-        .unwrap();
 
     let swap_action = SwapAction {
         pool_id: CONFIG.swap_pool_id,
         amount_in: Some(usdt_amount),
-        token_in: usdt_name,
-        token_out: wrap_id,
+        token_in: usdt_id(),
+        token_out: wrap_id(),
         min_amount_out: min_amount.into(),
     };
 
-    let max_burn_shares = U128(u128::MAX); // TODO: Any limits?
-
-    ext_ref_finance::remove_liquidity_by_tokens(
-        pool.id,
-        remove_amounts.clone(),
-        max_burn_shares,
-        pool.ref_id.clone(),
+    ext_ft::ft_transfer_call(
+        ref_id(),
+        usdt_amount.into(),
+        None,
+        REF_DEPOSIT_ACTION.into(),
+        usdt_id(),
         ONE_YOCTO,
-        GAS_FOR_REMOVE_LIQUIDITY,
+        GAS_FOR_FT_TRANSFER_CALL,
     )
     .then(ext_ref_finance::swap(
         vec![swap_action],
         None,
-        pool.ref_id,
+        ref_id(),
         NO_DEPOSIT,
         GAS_FOR_SWAP,
     ))
-    .then(ext_self::handle_withdraw_after_swap(
-        pool.id,
-        usn_amount,
+    .then(ext_self::handle_withdraw_near(
         env::current_account_id(),
         2 * ONE_YOCTO,
-        GAS_SURPLUS * 3 + GAS_FOR_WITHDRAW * 2 + GAS_FOR_NEAR_WITHDRAW + GAS_FOR_FINISH_BURNING,
+        GAS_SURPLUS * 2 + GAS_FOR_WITHDRAW + GAS_FOR_NEAR_WITHDRAW,
     ))
 }
 

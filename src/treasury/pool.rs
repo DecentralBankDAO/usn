@@ -54,6 +54,10 @@ const CONFIG: PoolsConfig = if cfg!(feature = "mainnet") {
     }
 };
 
+pub(crate) fn ref_id() -> AccountId {
+    CONFIG.ref_address.parse().unwrap()
+}
+
 #[near_bindgen]
 impl Contract {
     pub fn pools(&self) -> Vec<u64> {
@@ -114,8 +118,4 @@ impl Pool {
 
 pub fn extend_decimals(whole: u128, decimals: u8) -> u128 {
     whole * 10u128.pow(decimals as u32)
-}
-
-pub fn remove_decimals(amount: u128, decimals: u8) -> u128 {
-    amount / 10u128.pow(decimals as u32)
 }

@@ -4,7 +4,7 @@ use crate::*;
 
 const MAX_CACHE_SIZE: usize = 6;
 const FIVE_MINUTES: Timestamp = 5 * 60 * 1000_000_000;
-const ALFA_BASE: f64 = 0.3;
+const ALFA_BASE: f64 = 0.5;
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
@@ -186,31 +186,31 @@ mod tests {
                 CacheItem {
                     timestamp: 12 * ONE_MINUTE,
                     value: (5.011 + 5.234) / 2.,
-                    smoothed_value: 3.69625,
+                    smoothed_value: 4.10375,
                     n: 2,
                 },
                 CacheItem {
                     timestamp: 17 * ONE_MINUTE,
                     value: 6.656,
-                    smoothed_value: 4.584175,
+                    smoothed_value: 5.379875,
                     n: 1,
                 },
                 CacheItem {
                     timestamp: 23 * ONE_MINUTE,
                     value: (6.813 + 7.613 + 8.141) / 3.,
-                    smoothed_value: 5.661490498845394,
+                    smoothed_value: 6.582289084625408,
                     n: 3,
                 },
                 CacheItem {
                     timestamp: 30 * ONE_MINUTE,
                     value: 9.518,
-                    smoothed_value: 7.293450791138676,
+                    smoothed_value: 8.371624929944781,
                     n: 1,
                 },
                 CacheItem {
                     timestamp: 35 * ONE_MINUTE,
                     value: 10.813,
-                    smoothed_value: 8.349315553797073,
+                    smoothed_value: 9.592312464972391,
                     n: 1,
                 }
             ],
@@ -223,7 +223,7 @@ mod tests {
             &CacheItem {
                 timestamp: 42 * ONE_MINUTE,
                 value: 12.046,
-                smoothed_value: 9.913642629235415,
+                smoothed_value: 11.08785176914738,
                 n: 1,
             },
             cache.items.last().unwrap()
@@ -263,7 +263,7 @@ mod tests {
             cache.collect(7 * FIVE_MINUTES),
             Ok((
                 vec![-6.0, -5.0, -4.0, -3.0, -2.0, -1.0],
-                vec![3.085, 3.6628, 4.56076, 5.634532, 6.7995724, 8.00360068],
+                vec![3.085, 4.048, 5.352, 6.746, 8.132000000000001, 9.4725],
                 vec![3.085, 5.011, 6.656, 8.140, 9.518, 10.813],
             ))
         );

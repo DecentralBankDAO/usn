@@ -374,9 +374,9 @@ fn make_treasury_decision(
     limit: Option<f64>,
 ) -> TreasuryDecision {
     // 1. Set constant values for further calculations
-    const M: i32 = 4;
+    const M: i32 = 2;
     const N_DN: f64 = 0.25;
-    const U_UP: f64 = 1.1;
+    const U_UP: f64 = f64::INFINITY;
     const U_DN: f64 = 1.;
     const P_DN: f64 = 0.6;
     const P_UP: f64 = 0.7;
@@ -489,15 +489,15 @@ mod tests {
             vec![6.628, 6.61133, 6.473, 6.65133, 6.52333, 6.69033],
             vec![6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
             vec![-5., -4., -3., -2., -1., 0.],
-            191937460.53121,
-            1241195491.76577,
-            1367351872.04769,
+            111937460.53121,
+            1741195491.76577,
+            1757351872.04769,
             None,
         );
 
         assert_eq!(
             treasury_decision,
-            TreasuryDecision::Sell(13697.189945199696)
+            TreasuryDecision::Sell(63143.352928197695)
         );
     }
 
@@ -507,9 +507,9 @@ mod tests {
             vec![6.628, 6.61133, 6.473, 6.65133, 6.52333, 6.69033],
             vec![6.628, 6.623, 6.578, 6.6, 6.577, 6.611],
             vec![-5., -4., -3., -2., -1., -0.],
-            191937460.53121,
-            1241195491.76577,
-            1367351872.04769,
+            111937460.53121,
+            1741195491.76577,
+            1757351872.04769,
             Some(10000.),
         );
 
@@ -543,6 +543,6 @@ mod tests {
             None,
         );
 
-        assert_eq!(treasury_decision, TreasuryDecision::Buy(18702.59662301328));
+        assert_eq!(treasury_decision, TreasuryDecision::Buy(36024.19794716324));
     }
 }

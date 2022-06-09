@@ -115,6 +115,7 @@ impl From<Commission> for CommissionOutput {
 pub struct ExchangeResult {
     commission: Commission,
     amount: Balance,
+    rate: ExchangeRateValue,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
@@ -122,6 +123,7 @@ pub struct ExchangeResult {
 pub struct ExchangeResultOutput {
     commission: CommissionOutput,
     amount: U128,
+    rate: ExchangeRateValue,
 }
 
 impl From<ExchangeResult> for ExchangeResultOutput {
@@ -129,6 +131,7 @@ impl From<ExchangeResult> for ExchangeResultOutput {
         Self {
             commission: CommissionOutput::from(result.commission),
             amount: U128::from(result.amount),
+            rate: result.rate,
         }
     }
 }
@@ -487,16 +490,19 @@ impl Contract {
         &self,
         account: AccountId,
         amount: U128,
-        rate: ExchangeRateValue,
+        rates: Vec<ExchangeRateValue>,
     ) -> ExchangeResultOutput {
         let amount = u128::from(amount);
-        let rate = ExchangeRate::from(rate);
 
         assert_ne!(amount, 0, "Amount can't be zero");
-        assert_ne!(rate.multiplier(), 0, "Multiplier can't be zero");
-        assert_ne!(rate.decimals(), 0, "Decimals can't be zero");
+        for &v in &rates {
+            assert_ne!(v.multiplier(), 0, "Multiplier can't be zero");
+            assert_ne!(v.decimals(), 0, "Decimals can't be zero");
+        }
 
-        let rates = ExchangeRates::new(rate, rate);
+        let current_rate = ExchangeRate::from(rates[0]);
+        let smooth_rate = ExchangeRate::from(rates[1]);
+        let rates = ExchangeRates::new(current_rate, smooth_rate);
         let result = self.internal_predict_buy(&account, amount, &rates, None);
 
         ExchangeResultOutput::from(result)
@@ -531,6 +537,7 @@ impl Contract {
         ExchangeResult {
             commission: commission,
             amount: price_with_fee,
+            rate: ExchangeRateValue::from(rate),
         }
     }
 
@@ -538,16 +545,19 @@ impl Contract {
         &self,
         account: AccountId,
         amount: U128,
-        rate: ExchangeRateValue,
+        rates: Vec<ExchangeRateValue>,
     ) -> ExchangeResultOutput {
         let amount = u128::from(amount);
-        let rate = ExchangeRate::from(rate);
 
         assert_ne!(amount, 0, "Amount can't be zero");
-        assert_ne!(rate.multiplier(), 0, "Multiplier can't be zero");
-        assert_ne!(rate.decimals(), 0, "Decimals can't be zero");
+        for &v in &rates {
+            assert_ne!(v.multiplier(), 0, "Multiplier can't be zero");
+            assert_ne!(v.decimals(), 0, "Decimals can't be zero");
+        }
 
-        let rates = ExchangeRates::new(rate, rate);
+        let current_rate = ExchangeRate::from(rates[0]);
+        let smooth_rate = ExchangeRate::from(rates[1]);
+        let rates = ExchangeRates::new(current_rate, smooth_rate);
         let result = self.internal_predict_sell(&account, amount, &rates, None);
 
         ExchangeResultOutput::from(result)
@@ -580,6 +590,7 @@ impl Contract {
         ExchangeResult {
             commission: commission,
             amount: price_with_fee,
+            rate: ExchangeRateValue::from(rate),
         }
     }
 

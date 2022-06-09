@@ -133,6 +133,35 @@ near call usdn.testnet sell --accountId alice.testnet --args '{"amount": "118800
 near call usdn.testnet buy --args '{"to": "bob.testnet"}' --accountId alice.testnet --amount 1 --gas 50000000000000
 ```
 
+Predict Buy, Predict Sell
+```bash
+near view usdn.testnet predict_sell --args '{"amount": "10000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
+# Returns the following JSON:
+#
+# amount: '1611309938300594322359152', - amount NEAR, the user would recieve if sold USN
+# commission: {
+#   usn: '50000000000000000',          - commission in USN
+#   near: '8097034865832132273161',    - commission in NEAR
+# },
+# rate: {                              - the rate has been used for exchange
+#   "decimals": 28,
+#   "multiplier": "61751",
+# }
+
+near view usdn.testnet predict_buy --args '"amount": "10000000000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
+# Returns the following JSON:
+#
+# amount: '61442368502000000000',     - amount USN, the user would recieve if buy USN
+# commission: {
+#   usn: '308631498000000000',        - commission in USN
+#   near: '49980000000000000000000',  - commission in NEAR
+# },
+# rate: {                             - the rate has been used for exchange
+#   "decimals": 28,
+#   "multiplier": "61751",
+# }
+```
+
 # DAO
 
 ## Upgrade the contract via Upgrade Proposal
@@ -170,6 +199,9 @@ pub fn spread(&self, amount: Option<U128>) -> U128;
 pub fn version(&self) -> String;
 pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
+pub fn commission(&self) -> CommissionOutput;
+pub fn predict_sell(&self, account: AccountId, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
+pub fn predict_buy(&self, account: AccountId, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
 ```
 
 ## NEP-141 (ERC-20)

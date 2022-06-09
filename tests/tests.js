@@ -78,16 +78,26 @@ describe('Anyone', function () {
     const result = await global.aliceContract.predict_sell({
       account: config.bobId,
       amount: '10000000000000000000',
-      rate: {
-        multiplier: '61751',
-        decimals: 28,
-      },
+      rates: [
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+      ],
     });
     assert.deepEqual(result, {
       amount: '1611309938300594322359152',
       commission: {
         usn: '50000000000000000',
         near: '8097034865832132273161',
+      },
+      rate: {
+        "decimals": 28,
+        "multiplier": "61751",
       },
     });
   });
@@ -96,16 +106,26 @@ describe('Anyone', function () {
     const result = await global.aliceContract.predict_buy({
       account: config.bobId,
       amount: '10000000000000000000000000',
-      rate: {
-        multiplier: '61751',
-        decimals: 28,
-      },
+      rates: [
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+      ],
     });
     assert.deepEqual(result, {
       amount: '61442368502000000000',
       commission: {
         usn: '308631498000000000',
         near: '49980000000000000000000',
+      },
+      rate: {
+        "decimals": 28,
+        "multiplier": "61751",
       },
     });
   });

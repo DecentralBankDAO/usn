@@ -864,10 +864,15 @@ impl Contract {
             metadata: LazyOption<FungibleTokenMetadata>,
             black_list: LookupMap<AccountId, BlackListStatus>,
             status: ContractStatus,
-            oracle: Oracle,
+            oracle: OldOracle,
             spread: Spread,
             commission: Commission,
             treasury: LazyOption<OldTreasuryData>,
+        }
+
+        #[derive(BorshSerialize, BorshDeserialize)]
+        pub struct OldOracle {
+            pub last_report: Option<ExchangeRate>,
         }
 
         #[derive(BorshDeserialize, BorshSerialize)]
@@ -898,7 +903,7 @@ impl Contract {
             metadata: contract.metadata,
             black_list: contract.black_list,
             status: contract.status,
-            oracle: contract.oracle,
+            oracle: Oracle::default(),
             spread: contract.spread,
             commission: contract.commission,
             treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),

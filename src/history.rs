@@ -11,16 +11,16 @@ pub const ONE_HOUR: Timestamp = 60 * ONE_MINUTE;
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VolumeCacheItem {
-    usn: u128,
-    near: u128,
+    usn: U128,
+    near: U128,
     timestamp: Timestamp,
 }
 
 impl VolumeCacheItem {
     pub fn new(usn: u128, near: u128, ts: Timestamp) -> VolumeCacheItem {
         VolumeCacheItem {
-            usn: usn,
-            near: near,
+            usn: U128::from(usn),
+            near: U128::from(near),
             timestamp: ts,
         }
     }
@@ -30,26 +30,26 @@ impl VolumeCacheItem {
     }
 
     pub fn add(&mut self, usn: u128, near: u128) {
-        self.usn += usn;
-        self.near += near;
+        self.usn.0 += usn;
+        self.near.0 += near;
     }
 
     pub fn usn(&self) -> u128 {
-        self.usn
+        self.usn.0
     }
 
     pub fn near(&self) -> u128 {
-        self.near
+        self.near.0
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default, Debug)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VolumeCache {
     time_slot: Timestamp,
     max_age: Timestamp,
-    sum_usn: u128,
-    sum_near: u128,
+    sum_usn: U128,
+    sum_near: U128,
     items: Vec<VolumeCacheItem>,
 }
 
@@ -60,8 +60,8 @@ impl VolumeCache {
         VolumeCache {
             time_slot: time_slot,
             max_age: max_age,
-            sum_usn: 0,
-            sum_near: 0,
+            sum_usn: U128::from(0),
+            sum_near: U128::from(0),
             items: Vec::default(),
         }
     }
@@ -90,8 +90,8 @@ impl VolumeCache {
             return true;
         });
 
-        self.sum_near -= removed_near_sum;
-        self.sum_usn -= removed_usn_sum;
+        self.sum_near.0 -= removed_near_sum;
+        self.sum_usn.0 -= removed_usn_sum;
     }
 
     pub fn add(&mut self, usn: u128, near: u128, now: Timestamp) {
@@ -105,23 +105,23 @@ impl VolumeCache {
                 } else {
                     last_item.add(usn, near);
                 }
-                self.sum_near += near;
-                self.sum_usn += usn;
+                self.sum_near.0 += near;
+                self.sum_usn.0 += usn;
             }
         } else {
             self.items.push(item);
-            self.sum_near += near;
-            self.sum_usn += usn;
+            self.sum_near.0 += near;
+            self.sum_usn.0 += usn;
         }
         self.remove_older_items(now);
     }
 
     pub fn sum_usn(&self) -> u128 {
-        self.sum_usn
+        self.sum_usn.0
     }
 
     pub fn sum_near(&self) -> u128 {
-        self.sum_near
+        self.sum_near.0
     }
 
     pub fn refresh(&mut self, now: Timestamp) {
@@ -131,6 +131,12 @@ impl VolumeCache {
     #[cfg(test)]
     pub fn items(&self) -> &Vec<VolumeCacheItem> {
         &self.items
+    }
+}
+
+impl Default for VolumeCache {
+    fn default() -> Self {
+        VolumeCache::new(0, 0)
     }
 }
 

@@ -79,6 +79,14 @@ impl std::fmt::Display for ContractStatus {
     }
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Debug, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct HistoryData {
+    pub usn2near: VolumeHistory,
+    pub near2usn: VolumeHistory,
+    pub best_rate: MinMaxRate,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ExpectedRate {
@@ -851,6 +859,14 @@ impl Contract {
 
     pub fn treasury(&self) -> TreasuryData {
         self.treasury.get().expect("Valid treasury")
+    }
+
+    pub fn history(&self) -> HistoryData {
+        HistoryData {
+            usn2near: self.usn2near.clone(),
+            near2usn: self.near2usn.clone(),
+            best_rate: self.best_rate.clone(),
+        }
     }
 
     /// This is NOOP implementation. KEEP IT if you haven't changed contract state.

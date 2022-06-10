@@ -42,6 +42,7 @@ const usnMethods = {
     'commission',
     'guardians',
     'treasury',
+    "history",
     'predict_buy',
     'predict_sell',
   ],

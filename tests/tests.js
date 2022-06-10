@@ -74,6 +74,51 @@ describe('Anyone', function () {
     });
   });
 
+  it('should get a history', async () => {
+    const history = await global.aliceContract.history();
+    assert.deepEqual(history, {
+      best_rate: {
+        max_current: null,
+        max_previous: null,
+        min_current: null,
+        min_previous: null,
+        timestamp: 0
+      },
+      near2usn: {
+        five_min: {
+          items: [],
+          max_age: 300000000000,
+          sum_near: '0',
+          sum_usn: '0',
+          time_slot: 60000000000
+        },
+        one_hour: {
+          items: [],
+          max_age: 3600000000000,
+          sum_near: '0',
+          sum_usn: '0',
+          time_slot: 300000000000
+        }
+      },
+      usn2near: {
+        five_min: {
+          items: [],
+          max_age: 300000000000,
+          sum_near: '0',
+          sum_usn: '0',
+          time_slot: 60000000000
+        },
+        one_hour: {
+          items: [],
+          max_age: 3600000000000,
+          sum_near: '0',
+          sum_usn: '0',
+          time_slot: 300000000000
+        }
+      }
+    });
+  });
+
   it('should predict sell price', async () => {
     const result = await global.aliceContract.predict_sell({
       account: config.bobId,

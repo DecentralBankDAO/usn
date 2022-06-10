@@ -119,9 +119,36 @@ describe('Anyone', function () {
     });
   });
 
-  it('should predict sell price', async () => {
+  it('should predict sell price for an owner', async () => {
     const result = await global.aliceContract.predict_sell({
-      account: config.bobId,
+      account_id: config.usnId,
+      amount: '10000000000000000000',
+      rates: [
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+      ],
+    });
+    assert.deepEqual(result, {
+      amount: '1619406973166426454632313',
+      commission: {
+        usn: '0',
+        near: '0',
+      },
+      rate: {
+        "decimals": 28,
+        "multiplier": "61751",
+      },
+    });
+  });
+
+  it('should predict sell price for anyone', async () => {
+    const result = await global.aliceContract.predict_sell({
       amount: '10000000000000000000',
       rates: [
         {
@@ -147,9 +174,36 @@ describe('Anyone', function () {
     });
   });
 
-  it('should predict buy price', async () => {
+  it('should predict buy price for an owner', async () => {
     const result = await global.aliceContract.predict_buy({
-      account: config.bobId,
+      account_id: config.usnId,
+      amount: '10000000000000000000000000',
+      rates: [
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+        {
+          multiplier: '61751',
+          decimals: 28,
+        },
+      ],
+    });
+    assert.deepEqual(result, {
+      amount: '61751000000000000000',
+      commission: {
+        usn: '0',
+        near: '0',
+      },
+      rate: {
+        "decimals": 28,
+        "multiplier": "61751",
+      },
+    });
+  });
+
+  it('should predict buy price for anyone', async () => {
+    const result = await global.aliceContract.predict_buy({
       amount: '10000000000000000000000000',
       rates: [
         {

@@ -474,12 +474,14 @@ impl Contract {
 
     fn calculate_commission(
         &self,
-        account: &AccountId,
+        account_id: Option<AccountId>,
         amount_usn: u128,
         rate: &ExchangeRate,
     ) -> Commission {
-        if *account == self.owner_id {
-            return Commission { usn: 0, near: 0 };
+        if let Some(account) = account_id {
+            if account == self.owner_id.clone() {
+                return Commission { usn: 0, near: 0 };
+            }
         }
         let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
         let commission_usn =
@@ -496,13 +498,16 @@ impl Contract {
 
     pub fn predict_buy(
         &self,
-        account: AccountId,
+        account_id: Option<AccountId>,
         amount: U128,
         rates: Vec<ExchangeRateValue>,
     ) -> ExchangeResultOutput {
         let amount = u128::from(amount);
 
         assert_ne!(amount, 0, "Amount can't be zero");
+        assert_eq!(rates.len(), 2,
+          "The rates list must contain exactly two values: spot and EMA, e.g. 'wrap.near' and 'wrap.near#3600' assets from priceoracle.near"
+        );
         for &v in &rates {
             assert_ne!(v.multiplier(), 0, "Multiplier can't be zero");
             assert_ne!(v.decimals(), 0, "Decimals can't be zero");
@@ -511,14 +516,14 @@ impl Contract {
         let current_rate = ExchangeRate::from(rates[0]);
         let smooth_rate = ExchangeRate::from(rates[1]);
         let rates = ExchangeRates::new(current_rate, smooth_rate);
-        let result = self.internal_predict_buy(&account, amount, &rates, None);
+        let result = self.internal_predict_buy(account_id, amount, &rates, None);
 
         ExchangeResultOutput::from(result)
     }
 
     fn internal_predict_buy(
         &self,
-        account: &AccountId,
+        account_id: Option<AccountId>,
         amount: u128,
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
@@ -539,7 +544,7 @@ impl Contract {
         let amount = amount.as_u128();
 
         // Commission.
-        let commission = self.calculate_commission(account, amount, &rate);
+        let commission = self.calculate_commission(account_id, amount, &rate);
         let price_with_fee = amount - commission.usn;
 
         ExchangeResult {
@@ -551,13 +556,16 @@ impl Contract {
 
     pub fn predict_sell(
         &self,
-        account: AccountId,
+        account_id: Option<AccountId>,
         amount: U128,
         rates: Vec<ExchangeRateValue>,
     ) -> ExchangeResultOutput {
         let amount = u128::from(amount);
 
         assert_ne!(amount, 0, "Amount can't be zero");
+        assert_eq!(rates.len(), 2,
+          "The rates list must contain exactly two values: spot and EMA, e.g. 'wrap.near' and 'wrap.near#3600' assets from priceoracle.near"
+        );
         for &v in &rates {
             assert_ne!(v.multiplier(), 0, "Multiplier can't be zero");
             assert_ne!(v.decimals(), 0, "Decimals can't be zero");
@@ -566,14 +574,14 @@ impl Contract {
         let current_rate = ExchangeRate::from(rates[0]);
         let smooth_rate = ExchangeRate::from(rates[1]);
         let rates = ExchangeRates::new(current_rate, smooth_rate);
-        let result = self.internal_predict_sell(&account, amount, &rates, None);
+        let result = self.internal_predict_sell(account_id, amount, &rates, None);
 
         ExchangeResultOutput::from(result)
     }
 
     fn internal_predict_sell(
         &self,
-        account: &AccountId,
+        account_id: Option<AccountId>,
         amount: u128,
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
@@ -585,7 +593,7 @@ impl Contract {
         }
 
         let multiplier = U256::from(rate.multiplier());
-        let commission = self.calculate_commission(account, amount, &rate);
+        let commission = self.calculate_commission(account_id, amount, &rate);
 
         let amount: U256 = U256::from(amount) - commission.usn;
 
@@ -652,7 +660,7 @@ impl Contract {
         self.usn2near.refresh(env::block_timestamp());
         self.near2usn.refresh(env::block_timestamp());
 
-        let result = self.internal_predict_buy(&account, near, &rates, expected);
+        let result = self.internal_predict_buy(Some(account.clone()), near, &rates, expected);
 
         self.commission.usn += result.commission.usn;
         self.commission.near += result.commission.near;
@@ -712,7 +720,7 @@ impl Contract {
         self.usn2near.refresh(env::block_timestamp());
         self.near2usn.refresh(env::block_timestamp());
 
-        let result = self.internal_predict_sell(&account, amount, &rates, expected);
+        let result = self.internal_predict_sell(Some(account.clone()), amount, &rates, expected);
 
         self.commission.usn += result.commission.usn;
         self.commission.near += result.commission.near;
@@ -1486,7 +1494,7 @@ mod tests {
 
         let fresh_rate = ExchangeRate::test_fresh_rate();
         let result =
-            contract.calculate_commission(&accounts(2), 100000000000000000000, &fresh_rate);
+            contract.calculate_commission(Some(accounts(2)), 100000000000000000000, &fresh_rate);
 
         assert_eq!(result.usn, 499700000000000000);
         assert_eq!(result.near, 44840675167580470032932);
@@ -1500,7 +1508,7 @@ mod tests {
 
         let fresh_rate = ExchangeRate::test_fresh_rate();
         let result =
-            contract.calculate_commission(&accounts(1), 100000000000000000000, &fresh_rate);
+            contract.calculate_commission(Some(accounts(1)), 100000000000000000000, &fresh_rate);
 
         assert_eq!(result.usn, 0);
         assert_eq!(result.near, 0);

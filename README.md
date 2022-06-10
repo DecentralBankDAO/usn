@@ -148,7 +148,7 @@ near view usdn.testnet predict_sell --args '{"amount": "10000000000000000000", "
 #   "multiplier": "61751",
 # }
 
-near view usdn.testnet predict_buy --args '"amount": "10000000000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
+near view usdn.testnet predict_buy --args '{"amount": "10000000000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
 # Returns the following JSON:
 #
 # amount: '61442368502000000000',     - amount USN, the user would recieve if buy USN
@@ -200,8 +200,8 @@ pub fn version(&self) -> String;
 pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
 pub fn commission(&self) -> CommissionOutput;
-pub fn predict_sell(&self, account: AccountId, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
-pub fn predict_buy(&self, account: AccountId, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
+pub fn predict_sell(&self, account_id: Option<AccountId>, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
+pub fn predict_buy(&self, account_id: Option<AccountId>, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
 ```
 
 ## NEP-141 (ERC-20)

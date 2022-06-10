@@ -8,7 +8,7 @@ pub const ONE_MINUTE: Timestamp = 1 * 60 * 1000_000_000;
 pub const FIVE_MINUTES: Timestamp = 5 * ONE_MINUTE;
 pub const ONE_HOUR: Timestamp = 60 * ONE_MINUTE;
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VolumeCacheItem {
     usn: u128,
@@ -43,7 +43,7 @@ impl VolumeCacheItem {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VolumeCache {
     time_slot: Timestamp,
@@ -124,13 +124,17 @@ impl VolumeCache {
         self.sum_near
     }
 
+    pub fn refresh(&mut self, now: Timestamp) {
+        self.remove_older_items(now);
+    }
+
     #[cfg(test)]
     pub fn items(&self) -> &Vec<VolumeCacheItem> {
         &self.items
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct MinMaxRate {
     max_previous: Option<ExchangeRateValue>,
@@ -141,7 +145,7 @@ pub struct MinMaxRate {
 }
 
 impl MinMaxRate {
-    pub fn update(&mut self, rates: &ExchangeRates, ts: Timestamp) {
+    pub fn add(&mut self, rates: &ExchangeRates, ts: Timestamp) {
         let time_diff = ts - self.timestamp;
         let max_rate = ExchangeRateValue::from(rates.max());
         let min_rate = ExchangeRateValue::from(rates.min());
@@ -152,12 +156,18 @@ impl MinMaxRate {
             if self.min_current.is_none() || min_rate < self.min_current.unwrap() {
                 self.min_current = Some(min_rate);
             }
-        } else {
+        } else if time_diff < 2 * FIVE_MINUTES {
             self.timestamp = ts;
             self.max_previous = self.max_current;
             self.max_current = Some(max_rate);
             self.min_previous = self.min_current;
             self.min_current = Some(min_rate);
+        } else {
+            self.timestamp = ts;
+            self.max_current = Some(max_rate);
+            self.min_current = Some(min_rate);
+            self.max_previous = None;
+            self.min_previous = None;
         }
     }
 
@@ -178,7 +188,7 @@ impl MinMaxRate {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VolumeHistory {
     pub one_hour: VolumeCache,
@@ -196,6 +206,11 @@ impl VolumeHistory {
     pub fn add(&mut self, usn: u128, near: u128, now: Timestamp) {
         self.one_hour.add(usn, near, now);
         self.five_min.add(usn, near, now);
+    }
+
+    pub fn refresh(&mut self, now: Timestamp) {
+        self.one_hour.refresh(now);
+        self.five_min.refresh(now);
     }
 }
 
@@ -234,6 +249,10 @@ mod tests {
         cache.add(1, 0, timestamp + ONE_HOUR + 1);
         assert_eq!(cache.sum_usn(), 8);
         assert_eq!(cache.items().len(), 3);
+
+        cache.refresh(timestamp + ONE_HOUR + ONE_HOUR + 1);
+        assert_eq!(cache.sum_usn(), 0);
+        assert_eq!(cache.items().len(), 0);
     }
 
     #[test]
@@ -249,29 +268,38 @@ mod tests {
         let current = ExchangeRate::test_create_rate(520944008, 32);
         let smooth = ExchangeRate::test_create_rate(520944007, 32);
         let rates = ExchangeRates::new(current, smooth);
-        rate_history.update(&rates, env::block_timestamp());
+        rate_history.add(&rates, env::block_timestamp());
         assert!(rate_history.max_previous().unwrap() == ExchangeRateValue::from(current));
         assert!(rate_history.min_previous().unwrap() == ExchangeRateValue::from(smooth));
 
         let current = ExchangeRate::test_create_rate(520944009, 32);
         let smooth = ExchangeRate::test_create_rate(520944006, 32);
         let rates = ExchangeRates::new(current, smooth);
-        rate_history.update(&rates, env::block_timestamp() + 1);
+        rate_history.add(&rates, env::block_timestamp() + 1);
         assert!(rate_history.max_previous().unwrap() == ExchangeRateValue::from(current));
         assert!(rate_history.min_previous().unwrap() == ExchangeRateValue::from(smooth));
 
         let current1 = ExchangeRate::test_create_rate(520944010, 32);
         let smooth1 = ExchangeRate::test_create_rate(520944011, 32);
         let rates = ExchangeRates::new(current1, smooth1);
-        rate_history.update(&rates, env::block_timestamp() + FIVE_MINUTES + 1);
+        rate_history.add(&rates, env::block_timestamp() + FIVE_MINUTES + 1);
         assert!(rate_history.max_previous().unwrap() == ExchangeRateValue::from(current));
         assert!(rate_history.min_previous().unwrap() == ExchangeRateValue::from(smooth));
 
         let current2 = ExchangeRate::test_create_rate(520944010, 32);
         let smooth2 = ExchangeRate::test_create_rate(520944011, 32);
         let rates = ExchangeRates::new(current2, smooth2);
-        rate_history.update(&rates, env::block_timestamp() + FIVE_MINUTES * 3 + 1);
+        rate_history.add(&rates, env::block_timestamp() + FIVE_MINUTES * 3 + 1);
         assert!(rate_history.max_previous().unwrap() == ExchangeRateValue::from(smooth1));
         assert!(rate_history.min_previous().unwrap() == ExchangeRateValue::from(current1));
+
+        let current3 = ExchangeRate::test_create_rate(50000, 28);
+        let smooth3 = ExchangeRate::test_create_rate(50000, 28);
+        let rates = ExchangeRates::new(smooth3, current3);
+        rate_history.add(&rates, env::block_timestamp() + FIVE_MINUTES * 3 * 2 + 1);
+        assert!(rate_history.max_current.unwrap() == ExchangeRateValue::from(current3));
+        assert!(rate_history.max_current.unwrap() == ExchangeRateValue::from(smooth3));
+        assert!(rate_history.max_previous.is_none());
+        assert!(rate_history.max_previous.is_none());
     }
 }

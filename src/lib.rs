@@ -640,7 +640,9 @@ impl Contract {
         expected: Option<ExpectedRate>,
         rates: ExchangeRates,
     ) -> Balance {
-        self.best_rate.update(&rates, env::block_timestamp());
+        self.best_rate.add(&rates, env::block_timestamp());
+        self.usn2near.refresh(env::block_timestamp());
+        self.near2usn.refresh(env::block_timestamp());
 
         let result = self.internal_predict_buy(&account, near, &rates, expected);
 
@@ -698,7 +700,9 @@ impl Contract {
         expected: Option<ExpectedRate>,
         rates: ExchangeRates,
     ) -> Balance {
-        self.best_rate.update(&rates, env::block_timestamp());
+        self.best_rate.add(&rates, env::block_timestamp());
+        self.usn2near.refresh(env::block_timestamp());
+        self.near2usn.refresh(env::block_timestamp());
 
         let result = self.internal_predict_sell(&account, amount, &rates, expected);
 
@@ -1035,6 +1039,8 @@ mod tests {
     use near_sdk::{testing_env, Balance, ONE_NEAR, ONE_YOCTO};
 
     const ONE_USN: u128 = 1_000_000_000_000_000_000;
+
+    use crate::history::ONE_HOUR;
 
     use super::*;
 
@@ -1572,7 +1578,7 @@ mod tests {
                 Some(expected_rate.clone()),
                 fresh_rates.clone()
             ),
-            11143900000000000000000
+            11143800000000000000000
         );
         assert_eq!(
             contract.finish_buy(
@@ -1589,12 +1595,12 @@ mod tests {
         );
         assert_eq!(
             contract.near2usn.one_hour.sum_usn(),
-            11143900000000000000000 + 11143800000000000000000 + 11143900000000000000000 * 10
+            2 * 11143800000000000000000 + 11143900000000000000000 * 10
         );
         assert_eq!(contract.near2usn.five_min.sum_near(), 2 * 1_000 * ONE_NEAR);
         assert_eq!(
             contract.near2usn.five_min.sum_usn(),
-            11143900000000000000000 + 11143800000000000000000
+            11143800000000000000000 + 11143800000000000000000
         );
 
         assert_eq!(
@@ -1604,7 +1610,7 @@ mod tests {
                 Some(expected_rate.clone()),
                 fresh_rates.clone()
             ),
-            89735191450030958641050260
+            89735996697715321524076167
         );
         assert_eq!(
             contract.finish_sell(
@@ -1617,12 +1623,12 @@ mod tests {
         );
         assert_eq!(
             contract.usn2near.one_hour.sum_near(),
-            89735191450030958641050260 * 11 + 89735996697715321524076167
+            89735191450030958641050260 * 10 + 2 * 89735996697715321524076167
         );
         assert_eq!(contract.usn2near.one_hour.sum_usn(), 1_000 * ONE_USN * 12);
         assert_eq!(
             contract.usn2near.five_min.sum_near(),
-            89735191450030958641050260 + 89735996697715321524076167
+            2 * 89735996697715321524076167
         );
         assert_eq!(contract.usn2near.five_min.sum_usn(), 1_000 * ONE_USN * 2);
 
@@ -1686,6 +1692,26 @@ mod tests {
                 fresh_rates.clone()
             ),
             89735996697715321524076 // 0.0897
+        );
+
+        // Change the timestamp +1 hour
+        // The history must be clear
+        testing_env!(context
+            .block_timestamp(env::block_timestamp() + ONE_HOUR + 1)
+            .build());
+
+        let current1 = ExchangeRate::test_create_rate(52004, 28);
+        let smooth1 = ExchangeRate::test_create_rate(52004, 28);
+        let rates = ExchangeRates::new(current1, smooth1);
+
+        assert_eq!(
+            contract.finish_buy(
+                accounts(1),
+                1_234500000000000000000000, // 1.2345 NEAR
+                None,
+                rates.clone()
+            ),
+            6_419893800000000000
         );
     }
 

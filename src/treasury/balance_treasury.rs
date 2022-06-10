@@ -279,8 +279,9 @@ impl SelfHandler for Contract {
         const FIVE_MINUTES: Timestamp = 5 * 60 * 1000_000_000;
 
         // Update rate history for sell_price/buy_price
-        self.best_rate
-            .update(&exchange_rates, env::block_timestamp());
+        self.best_rate.add(&exchange_rates, env::block_timestamp());
+        self.usn2near.refresh(env::block_timestamp());
+        self.near2usn.refresh(env::block_timestamp());
 
         if cfg!(feature = "mainnet") || cfg!(feature = "testnet") {
             treasury.cache.append(exchange_rate.timestamp(), rate);

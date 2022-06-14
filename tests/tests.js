@@ -82,7 +82,7 @@ describe('Anyone', function () {
         max_previous: null,
         min_current: null,
         min_previous: null,
-        timestamp: 0
+        timestamp: 0,
       },
       near2usn: {
         five_min: {
@@ -90,15 +90,15 @@ describe('Anyone', function () {
           max_age: 300000000000,
           sum_near: '0',
           sum_usn: '0',
-          time_slot: 60000000000
+          time_slot: 60000000000,
         },
         one_hour: {
           items: [],
           max_age: 3600000000000,
           sum_near: '0',
           sum_usn: '0',
-          time_slot: 300000000000
-        }
+          time_slot: 300000000000,
+        },
       },
       usn2near: {
         five_min: {
@@ -106,16 +106,16 @@ describe('Anyone', function () {
           max_age: 300000000000,
           sum_near: '0',
           sum_usn: '0',
-          time_slot: 60000000000
+          time_slot: 60000000000,
         },
         one_hour: {
           items: [],
           max_age: 3600000000000,
           sum_near: '0',
           sum_usn: '0',
-          time_slot: 300000000000
-        }
-      }
+          time_slot: 300000000000,
+        },
+      },
     });
   });
 
@@ -141,8 +141,8 @@ describe('Anyone', function () {
         near: '0',
       },
       rate: {
-        "decimals": 28,
-        "multiplier": "61751",
+        decimals: 28,
+        multiplier: '61751',
       },
     });
   });
@@ -168,8 +168,8 @@ describe('Anyone', function () {
         near: '8097034865832132273161',
       },
       rate: {
-        "decimals": 28,
-        "multiplier": "61751",
+        decimals: 28,
+        multiplier: '61751',
       },
     });
   });
@@ -196,8 +196,8 @@ describe('Anyone', function () {
         near: '0',
       },
       rate: {
-        "decimals": 28,
-        "multiplier": "61751",
+        decimals: 28,
+        multiplier: '61751',
       },
     });
   });
@@ -223,8 +223,8 @@ describe('Anyone', function () {
         near: '49980000000000000000000',
       },
       rate: {
-        "decimals": 28,
-        "multiplier": "61751",
+        decimals: 28,
+        multiplier: '61751',
       },
     });
   });
@@ -796,9 +796,15 @@ describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
 
   before(async () => {
     // Set up "DAO" account.
-    await global.usnContract.set_owner({
-      args: { owner_id: config.aliceId },
+    await global.usnContract.propose_new_owner({
+      args: { proposed_owner_id: config.aliceId },
     });
+    assert.equal(await global.usnContract.owner(), config.usnId);
+
+    await global.aliceContract.accept_ownership({
+      args: {},
+    });
+
     dao = global.aliceContract;
 
     // Fill up USN account with the USDT token: $1000000.
@@ -907,8 +913,13 @@ describe('Stable Pool (USDT/USN) [pool_id: 1]', async function () {
     assert.equal(poolInfo2.amounts[1] + '000000000000', poolInfo2.amounts[0]);
   });
   after(async () => {
-    await dao.set_owner({
-      args: { owner_id: config.usnId },
+    await global.aliceContract.propose_new_owner({
+      args: { proposed_owner_id: config.usnId },
+    });
+    assert.equal(await global.aliceContract.owner(), config.aliceId);
+
+    await global.usnContract.accept_ownership({
+      args: {},
     });
   });
 });

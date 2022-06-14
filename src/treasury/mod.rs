@@ -1,6 +1,6 @@
+mod balance_stable_pool;
 mod balance_treasury;
 mod cache;
-mod exit_stable_pool;
 mod ft;
 mod gas;
 mod pool;

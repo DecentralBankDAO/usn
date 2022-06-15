@@ -4,6 +4,8 @@ use partial_min_max;
 use crate::oracle::priceoracle::{ext_priceoracle, PriceData};
 use crate::*;
 
+pub const DEFAULT_RATE_DECIMALS: u8 = 28;
+
 struct OracleConfig {
     pub oracle_address: &'static str,
     pub asset_id: &'static str,
@@ -107,6 +109,19 @@ impl ExchangeRate {
 
     pub fn timestamp(&self) -> Timestamp {
         self.timestamp
+    }
+
+    pub fn to_decimals(&self, decimals: u8) -> ExchangeRate {
+        let mut multiplier = self.multiplier;
+        if self.decimals < decimals {
+            let exp = decimals - self.decimals;
+            multiplier = self.multiplier * 10u128.pow(u32::from(exp));
+        } else if self.decimals > decimals {
+            let exp = self.decimals - decimals;
+            multiplier = self.multiplier / 10u128.pow(u32::from(exp))
+        }
+
+        ExchangeRate::new(multiplier, decimals)
     }
 }
 
@@ -231,17 +246,9 @@ impl From<PriceData> for ExchangeRates {
             recency_duration: price_data.recency_duration(),
         };
 
-        let mut smooth_multiplier: u128 = smooth_price.multiplier.into();
-        let mut smooth_decimals: u8 = smooth_price.decimals;
-        if smooth_decimals > current_price.decimals {
-            let exp = u32::from(smooth_decimals - current_price.decimals);
-            smooth_multiplier /= 10u128.pow(exp);
-            smooth_decimals = current_price.decimals
-        }
-
         let smooth_rate = ExchangeRate {
-            multiplier: smooth_multiplier,
-            decimals: smooth_decimals,
+            multiplier: smooth_price.multiplier.into(),
+            decimals: smooth_price.decimals.into(),
             timestamp: price_data.timestamp(),
             recency_duration: price_data.recency_duration(),
         };
@@ -317,6 +324,22 @@ mod tests {
         let first = ExchangeRate::test_create_rate(529944008, 32);
         let second = ExchangeRate::test_create_rate(52296, 28);
         assert!(first > second);
+
+        let first = ExchangeRate::test_create_rate(529944008, 32);
+        let second = ExchangeRate::test_create_rate(52994, 28);
+        assert_eq!(first.to_decimals(28), second);
+
+        let first = ExchangeRate::test_create_rate(529940000, 32);
+        let second = ExchangeRate::test_create_rate(52994, 28);
+        assert_eq!(first, second.to_decimals(28));
+
+        let first = ExchangeRate::test_create_rate(52994, 28);
+        let second = ExchangeRate::test_create_rate(52994, 28);
+        assert_eq!(first, second.to_decimals(28));
+
+        let first = ExchangeRate::test_create_rate(52994, 28);
+        let second = ExchangeRate::test_create_rate(62994, 28);
+        assert_ne!(first, second.to_decimals(28));
     }
 
     #[test]

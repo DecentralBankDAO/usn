@@ -26,7 +26,9 @@ use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
 use history::{MinMaxRate, VolumeHistory};
-use oracle::{ExchangeRate, ExchangeRateValue, ExchangeRates, Oracle, PriceData};
+use oracle::{
+    ExchangeRate, ExchangeRateValue, ExchangeRates, Oracle, PriceData, DEFAULT_RATE_DECIMALS,
+};
 use partial_min_max;
 use treasury::TreasuryData;
 
@@ -528,6 +530,10 @@ impl Contract {
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
     ) -> ExchangeResult {
+        let rates = ExchangeRates::new(
+            rates.current.to_decimals(DEFAULT_RATE_DECIMALS),
+            rates.smooth.to_decimals(DEFAULT_RATE_DECIMALS),
+        );
         let near = U256::from(amount);
 
         let rate = self.buy_price(amount, &rates);
@@ -586,6 +592,11 @@ impl Contract {
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
     ) -> ExchangeResult {
+        let rates = ExchangeRates::new(
+            rates.current.to_decimals(DEFAULT_RATE_DECIMALS),
+            rates.smooth.to_decimals(DEFAULT_RATE_DECIMALS),
+        );
+
         let rate = self.sell_price(amount, &rates);
 
         if let Some(expected) = expected {

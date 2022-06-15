@@ -156,8 +156,8 @@ describe('Anyone', function () {
           decimals: 28,
         },
         {
-          multiplier: '61751',
-          decimals: 28,
+          multiplier: '617511234',
+          decimals: 32,
         },
       ],
     });
@@ -211,8 +211,8 @@ describe('Anyone', function () {
           decimals: 28,
         },
         {
-          multiplier: '61751',
-          decimals: 28,
+          multiplier: '617511234',
+          decimals: 32,
         },
       ],
     });

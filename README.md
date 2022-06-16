@@ -169,7 +169,7 @@ near view usdn.testnet predict_buy --args '{"amount": "1000000000000000000000000
 1. Download `usn.mainnet.wasm` from https://github.com/binary-star-near/usn/releases
 2. Create an upgrade proposal:
    ```bash
-   sputnikdao proposal upgrade usn.mainnet.wasm usn --daoAcc usn --accountId alice.near --network mainnet
+   sputnikdao proposal upgrade usn.mainnet.wasm usn --daoAcc decentralbank --accountId alice.near --network mainnet
    ```
 
 # API

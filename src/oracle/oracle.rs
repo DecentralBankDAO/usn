@@ -53,7 +53,7 @@ impl ExchangeRates {
     }
 
     pub fn new(current: ExchangeRate, smooth: ExchangeRate) -> Self {
-        ExchangeRates {
+        Self {
             current: current,
             smooth: smooth,
         }
@@ -110,19 +110,6 @@ impl ExchangeRate {
     pub fn timestamp(&self) -> Timestamp {
         self.timestamp
     }
-
-    pub fn to_decimals(&self, decimals: u8) -> ExchangeRate {
-        let mut multiplier = self.multiplier;
-        if self.decimals < decimals {
-            let exp = decimals - self.decimals;
-            multiplier = self.multiplier * 10u128.pow(u32::from(exp));
-        } else if self.decimals > decimals {
-            let exp = self.decimals - decimals;
-            multiplier = self.multiplier / 10u128.pow(u32::from(exp))
-        }
-
-        ExchangeRate::new(multiplier, decimals)
-    }
 }
 
 impl PartialOrd for ExchangeRate {
@@ -168,6 +155,19 @@ impl ExchangeRateValue {
 
     pub fn decimals(&self) -> u8 {
         self.decimals
+    }
+
+    pub fn to_decimals(&self, decimals: u8) -> Self {
+        let mut multiplier = self.multiplier.0;
+        if self.decimals < decimals {
+            let exp = decimals - self.decimals;
+            multiplier = self.multiplier.0 * 10u128.pow(u32::from(exp));
+        } else if self.decimals > decimals {
+            let exp = self.decimals - decimals;
+            multiplier = self.multiplier.0 / 10u128.pow(u32::from(exp))
+        }
+
+        Self::new(multiplier, decimals)
     }
 }
 
@@ -309,7 +309,7 @@ impl ExchangeRates {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{ExchangeRate, ExchangeRates};
+    use super::{ExchangeRate, ExchangeRateValue, ExchangeRates};
 
     #[test]
     fn test_exchange_rate() {
@@ -324,22 +324,6 @@ mod tests {
         let first = ExchangeRate::test_create_rate(529944008, 32);
         let second = ExchangeRate::test_create_rate(52296, 28);
         assert!(first > second);
-
-        let first = ExchangeRate::test_create_rate(529944008, 32);
-        let second = ExchangeRate::test_create_rate(52994, 28);
-        assert_eq!(first.to_decimals(28), second);
-
-        let first = ExchangeRate::test_create_rate(529940000, 32);
-        let second = ExchangeRate::test_create_rate(52994, 28);
-        assert_eq!(first, second.to_decimals(28));
-
-        let first = ExchangeRate::test_create_rate(52994, 28);
-        let second = ExchangeRate::test_create_rate(52994, 28);
-        assert_eq!(first, second.to_decimals(28));
-
-        let first = ExchangeRate::test_create_rate(52994, 28);
-        let second = ExchangeRate::test_create_rate(62994, 28);
-        assert_ne!(first, second.to_decimals(28));
     }
 
     #[test]
@@ -368,5 +352,24 @@ mod tests {
         };
         assert!(rates.max() == second);
         assert!(rates.min() == first);
+    }
+
+    #[test]
+    fn test_exchange_rate_decimals() {
+        let first = ExchangeRateValue::new(529944008, 32);
+        let second = ExchangeRateValue::new(52994, 28);
+        assert_eq!(first.to_decimals(28), second);
+
+        let first = ExchangeRateValue::new(529940000, 32);
+        let second = ExchangeRateValue::new(52994, 28);
+        assert_eq!(first, second.to_decimals(28));
+
+        let first = ExchangeRateValue::new(52994, 28);
+        let second = ExchangeRateValue::new(52994, 28);
+        assert_eq!(first, second.to_decimals(28));
+
+        let first = ExchangeRateValue::new(52994, 28);
+        let second = ExchangeRateValue::new(62994, 28);
+        assert_ne!(first, second.to_decimals(28));
     }
 }

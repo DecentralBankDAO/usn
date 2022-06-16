@@ -404,15 +404,15 @@ impl Contract {
         let best_prev_rate = self
             .best_rate
             .min_previous()
-            .unwrap_or(ExchangeRateValue::from(rates.min()));
-        let default_decimals = best_prev_rate.decimals();
+            .unwrap_or(ExchangeRateValue::from(rates.min()))
+            .to_decimals(DEFAULT_RATE_DECIMALS);
 
         // Pn2u1h =if($VLMn2u1h>0,min(On2ubest(t-5m),$VLMn2u1h/VLMn2u1h), On2ubest(t-5m))
         let price_1hour: ExchangeRateValue = if one_hour_usn > U256::zero() {
             let multiplier = one_hour_usn
-                * U256::from(10u128.pow(u32::from(default_decimals - USN_DECIMALS)))
+                * U256::from(10u128.pow(u32::from(DEFAULT_RATE_DECIMALS - USN_DECIMALS)))
                 / one_hour_near;
-            let new_price = ExchangeRateValue::new(multiplier.as_u128(), default_decimals);
+            let new_price = ExchangeRateValue::new(multiplier.as_u128(), DEFAULT_RATE_DECIMALS);
 
             partial_min_max::min(new_price, best_prev_rate)
         } else {
@@ -422,7 +422,8 @@ impl Contract {
         // On2ubest = min (ORACLE_smooth,ORACLE_current)
         // Pn2u(t)=(VLMn2unow+VLMn2u5m)/(VLMn2unow+VLMn2u1h)*Pn2u1h +
         //         (VLMn2u1h—VLMn2u5m)/(VLMn2unow+VLMn2u1h)*On2ubest
-        let near2usn_best_rate = rates.min();
+        let near2usn_best_rate =
+            ExchangeRateValue::from(rates.min()).to_decimals(DEFAULT_RATE_DECIMALS);
 
         let a = (amount_near + five_min_near) * U256::from(price_1hour.multiplier())
             / (amount_near + one_hour_near);
@@ -430,7 +431,7 @@ impl Contract {
             / (amount_near + one_hour_near);
 
         let multiplier = a + b;
-        let price = ExchangeRate::new(multiplier.as_u128(), default_decimals);
+        let price = ExchangeRate::new(multiplier.as_u128(), DEFAULT_RATE_DECIMALS);
 
         price
     }
@@ -443,15 +444,15 @@ impl Contract {
         let best_prev_rate = self
             .best_rate
             .max_previous()
-            .unwrap_or(ExchangeRateValue::from(rates.max()));
-        let default_decimals = best_prev_rate.decimals();
+            .unwrap_or(ExchangeRateValue::from(rates.max()))
+            .to_decimals(DEFAULT_RATE_DECIMALS);
 
         // Pu2n1h = if($VLMu2n1h>0,max(Ou2nbest(t-5m),$VLMu2n1h/VLMu2n1h), Ou2nbest(t-5m))
         let price_1hour: ExchangeRateValue = if one_hour_usn > U256::zero() {
             let multiplier = one_hour_usn
-                * U256::from(10u128.pow(u32::from(default_decimals - USN_DECIMALS)))
+                * U256::from(10u128.pow(u32::from(DEFAULT_RATE_DECIMALS - USN_DECIMALS)))
                 / one_hour_near;
-            let new_price = ExchangeRateValue::new(multiplier.as_u128(), default_decimals);
+            let new_price = ExchangeRateValue::new(multiplier.as_u128(), DEFAULT_RATE_DECIMALS);
 
             partial_min_max::max(new_price, best_prev_rate)
         } else {
@@ -461,7 +462,8 @@ impl Contract {
         // Ou2nbest = max (ORACLE_smooth,ORACLE_current)
         // Pu2n(t)=($VLMu2nnow+$VLMu2n5m)/($VLMu2nnow+$VLMu2n1h)*Pu2n1h +
         //         ($VLMu2n1h—$VLMu2n5m)/($VLMu2nnow+$VLMu2n1h)*Ou2nbest
-        let usn2near_best_rate = rates.max();
+        let usn2near_best_rate =
+            ExchangeRateValue::from(rates.max()).to_decimals(DEFAULT_RATE_DECIMALS);
 
         let a = (amount_usn + five_min_usn) * U256::from(price_1hour.multiplier())
             / (amount_usn + one_hour_usn);
@@ -469,7 +471,7 @@ impl Contract {
             / (amount_usn + one_hour_usn);
 
         let multiplier = a + b;
-        let price = ExchangeRate::new(multiplier.as_u128(), default_decimals);
+        let price = ExchangeRate::new(multiplier.as_u128(), DEFAULT_RATE_DECIMALS);
 
         price
     }
@@ -530,10 +532,6 @@ impl Contract {
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
     ) -> ExchangeResult {
-        let rates = ExchangeRates::new(
-            rates.current.to_decimals(DEFAULT_RATE_DECIMALS),
-            rates.smooth.to_decimals(DEFAULT_RATE_DECIMALS),
-        );
         let near = U256::from(amount);
 
         let rate = self.buy_price(amount, &rates);
@@ -592,11 +590,6 @@ impl Contract {
         rates: &ExchangeRates,
         expected: Option<ExpectedRate>,
     ) -> ExchangeResult {
-        let rates = ExchangeRates::new(
-            rates.current.to_decimals(DEFAULT_RATE_DECIMALS),
-            rates.smooth.to_decimals(DEFAULT_RATE_DECIMALS),
-        );
-
         let rate = self.sell_price(amount, &rates);
 
         if let Some(expected) = expected {
@@ -1532,6 +1525,9 @@ mod tests {
 
         let mut contract = Contract::new(accounts(1));
 
+        //
+        // Smoke test
+        //
         let current1 = ExchangeRate::test_create_rate(82004, 28);
         let smooth1 = ExchangeRate::test_create_rate(82004, 28);
         let rates = ExchangeRates::new(current1, smooth1);
@@ -1546,6 +1542,39 @@ mod tests {
             10_123393800000000000 // 10.234 USN
         );
 
+        //
+        // Best rate test
+        //
+        let mut contract = Contract::new(accounts(1));
+        let current1 = ExchangeRate::test_create_rate(82004, 28);
+        let smooth1 = ExchangeRate::test_create_rate(820141234, 32);
+        contract.best_rate.add(
+            &ExchangeRates::new(current1, smooth1),
+            env::block_timestamp(),
+        );
+
+        // Change timestamp
+        testing_env!(context
+            .block_timestamp(env::block_timestamp() + FIVE_MINUTES + ONE_MINUTE)
+            .build());
+
+        let current1 = ExchangeRate::test_create_rate(82004, 28);
+        let smooth1 = ExchangeRate::test_create_rate(82014, 28);
+        let rates = ExchangeRates::new(current1, smooth1);
+
+        assert_eq!(
+            contract.finish_buy(accounts(1), 1_234500000000000000000000, None, rates.clone()),
+            10_123393800000000000
+        );
+
+        assert_eq!(
+            contract.finish_sell(accounts(1), 10 * ONE_USN, None, rates.clone()),
+            1219304021264662130855707
+        );
+
+        //
+        // History test
+        //
         let mut contract = Contract::new(accounts(1));
 
         let fresh_rates = ExchangeRates::test_fresh_rate();

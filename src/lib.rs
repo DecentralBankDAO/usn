@@ -945,6 +945,7 @@ impl Contract {
         #[derive(BorshDeserialize, BorshSerialize)]
         pub struct OldContract {
             owner_id: AccountId,
+            proposed_owner_id: AccountId,
             guardians: UnorderedSet<AccountId>,
             token: FungibleTokenFreeStorage,
             metadata: LazyOption<FungibleTokenMetadata>,
@@ -954,6 +955,9 @@ impl Contract {
             spread: Spread,
             commission: Commission,
             treasury: LazyOption<TreasuryData>,
+            usn2near: VolumeHistory,
+            near2usn: VolumeHistory,
+            best_rate: MinMaxRate,
         }
 
         let contract: OldContract = env::state_read().expect("Contract is not initialized");
@@ -966,13 +970,13 @@ impl Contract {
             metadata: contract.metadata,
             black_list: contract.black_list,
             status: contract.status,
-            oracle: Oracle::default(),
+            oracle: contract.oracle,
             spread: contract.spread,
             commission: contract.commission,
-            treasury: LazyOption::new(StorageKey::TreasuryData, Some(&TreasuryData::default())),
-            usn2near: VolumeHistory::new(),
-            near2usn: VolumeHistory::new(),
-            best_rate: MinMaxRate::default(),
+            treasury: contract.treasury,
+            usn2near: contract.usn2near,
+            near2usn: contract.near2usn,
+            best_rate: contract.best_rate,
             stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
         }
     }

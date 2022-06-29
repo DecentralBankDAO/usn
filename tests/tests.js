@@ -635,6 +635,21 @@ describe('Fixed Spread', async function () {
 
   after(async () => {
     await global.usnContract.set_adaptive_spread({ args: {} });
+
+    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    // Flush balances.
+
+    if (aliceUsnBalance != '0') {
+      await global.aliceContract.ft_transfer({
+        args: {
+          receiver_id: config.usnId,
+          amount: aliceUsnBalance,
+        },
+        amount: ONE_YOCTO,
+      });
+    }
   });
 });
 
@@ -1009,24 +1024,6 @@ describe('Balance treasury', async function () {
     });
     assert(new BN(poolShareAfter, 10).lt(new BN(poolShareBefore, 10)));
   });
-
-
-  afterEach(async () => {
-    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    // Flush balances.
-
-    if (aliceUsnBalance != '0') {
-      await global.aliceContract.ft_transfer({
-        args: {
-          receiver_id: config.usnId,
-          amount: aliceUsnBalance,
-        },
-        amount: ONE_YOCTO,
-      });
-    }
-  });
 });
 
 describe('Refund treasury', async function () {
@@ -1369,7 +1366,7 @@ describe('Exchange USN to USDT/USDC and vice versa', function () {
       account_id: config.aliceId
     });
     assert.equal(aliceUsdtBalance, '0');
-    assert.equal(aliceUsnBalance, '999000000000000000000000');
+    assert.equal(aliceUsnBalance, '999900000000000000000000');
   });
 
   it('should swap USN to USDT with correct price', async () => {
@@ -1384,7 +1381,7 @@ describe('Exchange USN to USDT/USDC and vice versa', function () {
 
     const usnToSend = '10000000000000000000';
     const expectedUsn = new BN(usnAmount).sub(new BN(usnToSend)).toString();
-    const expectedUsdt = '9990000';
+    const expectedUsdt = '9999000';
     // Alice swaps USN to USDT.
     await global.aliceContract.withdraw({
       args: {

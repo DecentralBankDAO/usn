@@ -44,7 +44,7 @@ const usnMethods = {
     'commission',
     'guardians',
     'treasury',
-    "history",
+    'history',
     'predict_buy',
     'predict_sell',
   ],
@@ -72,6 +72,7 @@ const usnMethods = {
     'balance_stable_pool',
     'balance_treasury',
     'warmup',
+    'withdraw',
     'refund_treasury'
   ],
 };
@@ -324,6 +325,7 @@ async function sandboxSetup() {
     usnMethods
   );
   const bobUsdt = new nearAPI.Contract(bobAccount, config.usdtId, usdtMethods);
+  const aliceUsdt = new nearAPI.Contract(aliceAccount, config.usdtId, usdtMethods);
   const usnUsdt = new nearAPI.Contract(usnAccount, config.usdtId, usdtMethods);
   const usnWnear = new nearAPI.Contract(usnAccount, config.wnearId, wnearMethods);
 
@@ -335,6 +337,7 @@ async function sandboxSetup() {
   global.wnearContract = wnearContract;
   global.priceoracleContract = oracleContract;
   global.aliceAccount = aliceAccount;
+  global.aliceUsdt = aliceUsdt;
   global.aliceContract = aliceContract;
   global.bobContract = bobContract;
   global.bobUsdt = bobUsdt;

@@ -1009,6 +1009,24 @@ describe('Balance treasury', async function () {
     });
     assert(new BN(poolShareAfter, 10).lt(new BN(poolShareBefore, 10)));
   });
+
+
+  afterEach(async () => {
+    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    // Flush balances.
+
+    if (aliceUsnBalance != '0') {
+      await global.aliceContract.ft_transfer({
+        args: {
+          receiver_id: config.usnId,
+          amount: aliceUsnBalance,
+        },
+        amount: ONE_YOCTO,
+      });
+    }
+  });
 });
 
 describe('Refund treasury', async function () {
@@ -1311,5 +1329,110 @@ describe('Refund treasury', async function () {
         .sub(new BN(nearAmountBefore.amount, 10))
         .gt(new BN('060000000000000000000000', 10))
     );
+  });
+});
+
+describe('Exchange USN to USDT/USDC and vice versa', function () {
+  this.timeout(14000);
+
+  before(async () => {
+    // Register Alice in the USDT contract.
+    await usdtContract.mint({
+      args: { account_id: config.aliceId, amount: '0' },
+    });
+  });
+
+  it('should swap USDT to USN with correct price', async () => {
+    const usdtAmount = '1000000000000';
+
+    // Alice gets USDT.
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.aliceId, amount: usdtAmount },
+      amount: ONE_YOCTO,
+    });
+
+    // Alice swaps USDT to USN.
+    await global.aliceUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: usdtAmount,
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceUsdtBalance = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId
+    });
+    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId
+    });
+    assert.equal(aliceUsdtBalance, '0');
+    assert.equal(aliceUsnBalance, '999000000000000000000000');
+  });
+
+  it('should swap USN to USDT with correct price', async () => {
+    // Alice gets USN.
+    const usnAmount = await global.aliceContract.buy({
+      args: {
+        expected: { multiplier: '111439', slippage: '10', decimals: 28 },
+      },
+      amount: ONE_NEAR,
+      gas: GAS_FOR_CALL,
+    });
+
+    const usnToSend = '10000000000000000000';
+    const expectedUsn = new BN(usnAmount).sub(new BN(usnToSend)).toString();
+    const expectedUsdt = '9990000';
+    // Alice swaps USN to USDT.
+    await global.aliceContract.withdraw({
+      args: {
+        amount: usnToSend,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+    const aliceUsdtBalance = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(aliceUsdtBalance, expectedUsdt);
+    assert.equal(aliceUsnBalance, expectedUsn);
+  });
+
+  afterEach(async () => {
+    const aliceUsnBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    const aliceUsdtBalance = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    // Flush balances.
+
+    if (aliceUsnBalance != '0') {
+      await global.aliceContract.ft_transfer({
+        args: {
+          receiver_id: config.usnId,
+          amount: aliceUsnBalance,
+        },
+        amount: ONE_YOCTO,
+      });
+    }
+
+    if (aliceUsdtBalance != '0') {
+      await global.aliceUsdt.ft_transfer({
+        args: {
+          receiver_id: config.usdtId,
+          amount: aliceUsdtBalance,
+        },
+        amount: ONE_YOCTO,
+      });
+    }
   });
 });

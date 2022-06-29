@@ -12,7 +12,7 @@ const GAS_FOR_CALL = '200000000000000'; // 200 TGas
 describe('Smoke Test', function () {
   it('should get a version', async () => {
     const version = await global.aliceContract.version();
-    assert.match(version, /1\..\../);
+    assert.match(version, /2\..\../);
   });
 });
 

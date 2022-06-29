@@ -1433,3 +1433,175 @@ describe('Exchange USN to USDT/USDC and vice versa', function () {
     }
   });
 });
+
+describe('Withdraw Stable Pool', async function () {
+  this.timeout(30000);
+
+  const MAX_TRANSFER_COST = '780000000000000000001';
+
+  before(async () => {
+    // Fill up USN account with USDT token: $1000000.
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.usnId, amount: '1000000000000' },
+      amount: ONE_YOCTO,
+    });
+
+    // Add stable liquidity to a stable pool.
+    await global.usnContract.transfer_stable_liquidity({
+      args: { pool_id: 0, whole_amount: '1000000' },
+      amount: MAX_TRANSFER_COST,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Fill up Bob's account with USDT token: $1000
+    await global.usdtContract.ft_transfer({
+      args: { receiver_id: config.bobId, amount: '1000000000' },
+      amount: ONE_YOCTO,
+    });
+
+    // Fill up Bob's account with USN token: ~$1000
+    const usnAmount = await global.bobContract.buy({
+      args: {},
+      amount: ONE_NEAR + '00',
+      gas: GAS_FOR_CALL,
+    });
+
+    // Transfer Bob USDT to Ref.Finance.
+    await global.bobUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: '1000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Transfer Bob USN to Ref.Finance.
+    await global.bobContract.ft_transfer_call({
+      args: {
+        receiver_id: config.refId,
+        amount: usnAmount,
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Make a pool of 2 participants at least ('usn' and 'bob.test.near').
+    // This is needed to simulate liquidity removal by 'usn' only.
+    await global.bobRef.add_stable_liquidity({
+      args: {
+        pool_id: 0,
+        amounts: [usnAmount, '1000000000'],
+        min_shares: '0',
+      },
+      amount: MAX_TRANSFER_COST,
+    });
+  });
+
+  it('should fail being called not by owner or guardian', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.withdraw_stable_pool({
+          args: {},
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should remove stable liquidity', async () => {
+    // Clear wNEAR 'usn' account.
+    await global.wnearContract.burn({
+      args: {
+        account_id: config.usnId,
+        amount: await global.wnearContract.ft_balance_of({
+          account_id: config.usnId,
+        }),
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(wrapAmountBefore, '0');
+
+    const poolInfoBefore = await global.refContract.get_stable_pool({
+      pool_id: 0,
+    });
+
+    await global.usnContract.withdraw_stable_pool({
+      args: {},
+      amount: 3 * ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const poolInfoAfter = await global.refContract.get_stable_pool({
+      pool_id: 0,
+    });
+
+    const usnDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usnId,
+    });
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    const wrapAmount = await global.wnearContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    assert.equal(usnDeposit, '0');
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
+    assert.equal(wrapAmount, '0');
+
+    assert(
+      new BN(poolInfoBefore.amounts[0]).gt(
+        new BN(poolInfoAfter.amounts[0])
+      )
+    );
+
+    assert(
+      new BN(poolInfoBefore.amounts[1]).gt(
+        new BN(poolInfoAfter.amounts[1])
+      )
+    );
+
+    // USN: after < before.
+    const poolUsn5Percent = new BN(poolInfoBefore.amounts[0])
+      .mul(new BN(5)).div(new BN(100));
+
+    const poolUsn49Percent = new BN(poolInfoBefore.amounts[0])
+      .mul(new BN(49)).div(new BN(1000));
+    const usnAmountDiff = new BN(poolInfoBefore.amounts[0])
+      .sub(new BN(poolInfoAfter.amounts[0]));
+
+    assert(usnAmountDiff.gt(new BN(poolUsn49Percent)));
+    assert(usnAmountDiff.lt(new BN(poolUsn5Percent)));
+
+    // USDT: after < before.
+    const poolUsdt5Percent = new BN(poolInfoBefore.amounts[1])
+      .mul(new BN(5)).div(new BN(100));
+
+    const poolUsdt49Percent = new BN(poolInfoBefore.amounts[1])
+      .mul(new BN(49)).div(new BN(1000));
+    const usdtAmountDiff = new BN(poolInfoBefore.amounts[1])
+      .sub(new BN(poolInfoAfter.amounts[1]));
+
+    assert(usdtAmountDiff.gt(new BN(poolUsdt49Percent)));
+    assert(usdtAmountDiff.lt(new BN(poolUsdt5Percent)));
+  });
+}); 

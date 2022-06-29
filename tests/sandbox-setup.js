@@ -73,6 +73,7 @@ const usnMethods = {
     'balance_treasury',
     'warmup',
     'withdraw',
+    'withdraw_stable_pool',
     'refund_treasury'
   ],
 };
@@ -326,9 +327,12 @@ async function sandboxSetup() {
   );
   const bobUsdt = new nearAPI.Contract(bobAccount, config.usdtId, usdtMethods);
   const aliceUsdt = new nearAPI.Contract(aliceAccount, config.usdtId, usdtMethods);
+  const bobRef = new nearAPI.Contract(bobAccount, config.refId, refMethods);
   const usnUsdt = new nearAPI.Contract(usnAccount, config.usdtId, usdtMethods);
   const usnWnear = new nearAPI.Contract(usnAccount, config.wnearId, wnearMethods);
 
+  await bobRef.storage_deposit({ args: {}, amount: '10000000000000000000000' });
+  
   // Setup a global test context.
   global.usnAccount = usnAccount;
   global.usnContract = usnContract;
@@ -342,6 +346,7 @@ async function sandboxSetup() {
   global.bobContract = bobContract;
   global.bobUsdt = bobUsdt;
   global.usnUsdt = usnUsdt;
+  global.bobRef = bobRef;
   global.usnWnear = usnWnear;
   global.usnRef = usnRef;
 }

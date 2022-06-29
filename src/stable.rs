@@ -3,18 +3,46 @@ use crate::*;
 use near_sdk::{collections::UnorderedMap, IntoStorageKey};
 
 const USDT_DECIMALS: u8 = 6;
+const USDC_DECIMALS: u8 = 6;
+const DAI_DECIMALS: u8 = 18;
 const COMMISSION_INTEREST: u128 = 100; // 0.0001 = 0.01%
 
-pub fn usdt_id() -> AccountId {
-    if cfg!(feature = "mainnet") {
-        "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near"
-    } else if cfg!(feature = "testnet") {
-        "usdt.fakes.testnet"
-    } else {
-        "usdt.test.near"
+pub struct StableConfig {
+    pub usdt_id: &'static str,
+    pub usdc_id: &'static str,
+    pub dai_id: &'static str,
+}
+
+pub const CONFIG: StableConfig = if cfg!(feature = "mainnet") {
+    StableConfig {
+        usdt_id: "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
+        usdc_id: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+        dai_id: "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near",
     }
-    .parse()
-    .unwrap()
+} else if cfg!(feature = "testnet") {
+    StableConfig {
+        usdt_id: "usdt.fakes.testnet",
+        usdc_id: "usdc.fakes.testnet",
+        dai_id: "dai.fakes.testnet",
+    }
+} else {
+    StableConfig {
+        usdt_id: "usdt.test.near",
+        usdc_id: "usdc.test.near",
+        dai_id: "dai.test.near",
+    }
+};
+
+pub fn usdt_id() -> AccountId {
+    CONFIG.usdt_id.parse().unwrap()
+}
+
+pub fn usdc_id() -> AccountId {
+    CONFIG.usdc_id.parse().unwrap()
+}
+
+pub fn dai_id() -> AccountId {
+    CONFIG.dai_id.parse().unwrap()
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -38,8 +66,10 @@ impl StableTreasury {
             stable_token: UnorderedMap::new(prefix),
         };
 
-        // USDT is supported by default.
+        // USDT, USDC, DAI are supported by default.
         this.add_token(&usdt_id(), USDT_DECIMALS);
+        this.add_token(&usdc_id(), USDC_DECIMALS);
+        this.add_token(&dai_id(), DAI_DECIMALS);
         this
     }
 
@@ -135,6 +165,10 @@ mod tests {
         let treasury = StableTreasury::new(StorageKey::StableTreasury);
         assert_eq!(treasury.supported_tokens()[0].0, usdt_id());
         assert_eq!(treasury.supported_tokens()[0].1.decimals, 6);
+        assert_eq!(treasury.supported_tokens()[1].0, usdc_id());
+        assert_eq!(treasury.supported_tokens()[1].1.decimals, 6);
+        assert_eq!(treasury.supported_tokens()[2].0, dai_id());
+        assert_eq!(treasury.supported_tokens()[2].1.decimals, 18);
     }
 
     #[test]
@@ -158,10 +192,10 @@ mod tests {
     fn test_view_stable_tokens() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         treasury.add_token(&accounts(1), 20);
-        assert_eq!(treasury.supported_tokens().len(), 2);
-        assert_eq!(treasury.supported_tokens()[1].0, accounts(1));
+        assert_eq!(treasury.supported_tokens().len(), 4);
+        assert_eq!(treasury.supported_tokens()[3].0, accounts(1));
         treasury.remove_token(&accounts(1));
-        assert_eq!(treasury.supported_tokens().len(), 1);
+        assert_eq!(treasury.supported_tokens().len(), 3);
     }
 
     #[test]

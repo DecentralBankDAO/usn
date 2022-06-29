@@ -74,7 +74,7 @@ const usnMethods = {
     'warmup',
     'withdraw',
     'withdraw_stable_pool',
-    'refund_treasury'
+    'refund_treasury',
   ],
 };
 
@@ -102,24 +102,34 @@ const refMethods = {
     'extend_whitelisted_tokens',
     'add_stable_liquidity',
     'add_simple_pool',
-    'add_liquidity'
+    'add_liquidity',
   ],
 };
 
 const wnearMethods = {
   viewMethods: ['ft_balance_of'],
-  changeMethods: ['new', 'mint', 'burn', 'near_deposit', 'ft_transfer', 'near_withdraw', 'ft_transfer_call',],
+  changeMethods: [
+    'new',
+    'mint',
+    'burn',
+    'near_deposit',
+    'ft_transfer',
+    'near_withdraw',
+    'ft_transfer_call',
+  ],
 };
 
 async function sandboxSetup() {
-  portUsed.check(config.port, config.domain)
-    .then((inUse) => {
+  portUsed.check(config.port, config.domain).then(
+    (inUse) => {
       if (!inUse) {
         throw new Error('Run sandbox first: `npm run sandbox:test`!');
       }
-    }, (err) => {
+    },
+    (err) => {
       console.error('Error on check:', err.message);
-    });
+    }
+  );
 
   const keyFile = require(config.keyPath);
   const privKey = nearAPI.utils.KeyPair.fromString(keyFile.secret_key);
@@ -191,6 +201,12 @@ async function sandboxSetup() {
   });
   await usdtContract.mint({
     args: { account_id: config.usnId, amount: '10000000000000' },
+  });
+  await usdtContract.mint({
+    args: { account_id: config.aliceId, amount: '1000000000000' },
+  });
+  await usdtContract.mint({
+    args: { account_id: config.bobId, amount: '1000000000000' },
   });
 
   // Deploy WNEAR contract.
@@ -266,7 +282,7 @@ async function sandboxSetup() {
 
   await refContract.extend_whitelisted_tokens({
     args: {
-      tokens: [config.usdtId, config.wnearId, config.usnId]
+      tokens: [config.usdtId, config.wnearId, config.usnId],
     },
     amount: '1',
   });
@@ -326,13 +342,21 @@ async function sandboxSetup() {
     usnMethods
   );
   const bobUsdt = new nearAPI.Contract(bobAccount, config.usdtId, usdtMethods);
-  const aliceUsdt = new nearAPI.Contract(aliceAccount, config.usdtId, usdtMethods);
+  const aliceUsdt = new nearAPI.Contract(
+    aliceAccount,
+    config.usdtId,
+    usdtMethods
+  );
   const bobRef = new nearAPI.Contract(bobAccount, config.refId, refMethods);
   const usnUsdt = new nearAPI.Contract(usnAccount, config.usdtId, usdtMethods);
-  const usnWnear = new nearAPI.Contract(usnAccount, config.wnearId, wnearMethods);
+  const usnWnear = new nearAPI.Contract(
+    usnAccount,
+    config.wnearId,
+    wnearMethods
+  );
 
   await bobRef.storage_deposit({ args: {}, amount: '10000000000000000000000' });
-  
+
   // Setup a global test context.
   global.usnAccount = usnAccount;
   global.usnContract = usnContract;

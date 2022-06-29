@@ -673,6 +673,7 @@ impl Contract {
     ///     want to return a promise in the middle.
     #[payable]
     pub fn buy(&mut self, expected: Option<ExpectedRate>, to: Option<AccountId>) {
+        self.assert_owner();
         self.abort_if_pause();
         self.abort_if_blacklisted(&env::predecessor_account_id());
 
@@ -741,6 +742,7 @@ impl Contract {
     #[payable]
     pub fn sell(&mut self, amount: U128, expected: Option<ExpectedRate>) -> Promise {
         assert_one_yocto();
+        self.assert_owner();
         self.abort_if_pause();
         self.abort_if_blacklisted(&env::predecessor_account_id());
 
@@ -1404,6 +1406,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "This method can be called only by owner")]
     fn test_buy_sell() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());
@@ -1436,6 +1439,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "This method can be called only by owner")]
     fn test_buy_auto_registration() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());
@@ -1451,7 +1455,25 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Account 'charlie' is banned")]
+    fn test_deposit_auto_registration() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        testing_env!(context.predecessor_account_id(usdt_id()).build());
+        contract.ft_on_transfer(accounts(2), U128(1000000000), "".to_string());
+
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .attached_deposit(ONE_YOCTO)
+            .build());
+
+        contract.withdraw(None, U128(999900000000000000000));
+    }
+
+    #[test]
+    #[should_panic(expected = "This method can be called only by owner")]
     fn test_cannot_buy() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());
@@ -1470,7 +1492,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Account 'charlie' is banned")]
+    #[should_panic(expected = "This method can be called only by owner")]
     fn test_cannot_sell() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());

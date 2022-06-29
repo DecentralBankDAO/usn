@@ -1450,24 +1450,107 @@ describe('Withdraw Stable Pool', async function () {
     );
   });
 
-  it('should remove stable liquidity', async () => {
-    // Clear wNEAR 'usn' account.
-    await global.wnearContract.burn({
-      args: {
-        account_id: config.usnId,
-        amount: await global.wnearContract.ft_balance_of({
-          account_id: config.usnId,
-        }),
+  it('should fail trying to withdraw 100% because there is only 1 participant', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.withdraw_stable_pool({
+          args: { percent: 100 },
+          amount: 3 * ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
       },
+      (err) => {
+        assert.match(err.message, /Callback computation 0 was not successful/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail trying to withdraw 101% of liquidity', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.withdraw_stable_pool({
+          args: { percent: 101 },
+          amount: 3 * ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Maximum 100%/);
+        return true;
+      }
+    );
+  });
+
+  it('should withdraw 99% of shares', async () => {
+    const poolInfoBefore = await global.refContract.get_stable_pool({
+      pool_id: 0,
+    });
+
+    await global.usnContract.withdraw_stable_pool({
+      args: { percent: 99 },
+      amount: 3 * ONE_YOCTO,
       gas: GAS_FOR_CALL,
     });
 
-    const wrapAmountBefore = await global.wnearContract.ft_balance_of({
-      account_id: config.usnId,
+    const poolInfoAfter = await global.refContract.get_stable_pool({
+      pool_id: 0,
     });
 
-    assert.equal(wrapAmountBefore, '0');
+    const usnDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usnId,
+    });
+    const usdtDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.usdtId,
+    });
+    const wrapDeposit = await global.refContract.get_deposit({
+      account_id: config.usnId,
+      token_id: config.wnearId,
+    });
+    assert.equal(usnDeposit, '0');
+    assert.equal(usdtDeposit, '0');
+    assert.equal(wrapDeposit, '0');
 
+    assert(
+      new BN(poolInfoBefore.amounts[0]).gt(new BN(poolInfoAfter.amounts[0]))
+    );
+
+    assert(
+      new BN(poolInfoBefore.amounts[1]).gt(new BN(poolInfoAfter.amounts[1]))
+    );
+
+    const poolUsn99Percent = new BN(poolInfoBefore.amounts[0])
+      .mul(new BN(991))
+      .div(new BN(1000));
+    const poolUsn98Percent = new BN(poolInfoBefore.amounts[0])
+      .mul(new BN(98))
+      .div(new BN(100));
+    const usnAmountDiff = new BN(poolInfoBefore.amounts[0]).sub(
+      new BN(poolInfoAfter.amounts[0])
+    );
+
+    // Withdrawn 98% < USN < 99%
+    assert(usnAmountDiff.gt(new BN(poolUsn98Percent)));
+    assert(usnAmountDiff.lt(new BN(poolUsn99Percent)));
+
+    const poolUsdt99Percent = new BN(poolInfoBefore.amounts[1])
+      .mul(new BN(991))
+      .div(new BN(1000));
+    const poolUsdt98Percent = new BN(poolInfoBefore.amounts[1])
+      .mul(new BN(98))
+      .div(new BN(100));
+    const usdtAmountDiff = new BN(poolInfoBefore.amounts[1]).sub(
+      new BN(poolInfoAfter.amounts[1])
+    );
+
+    // Withdrawn 98% < USDT < 99%
+    assert(usdtAmountDiff.gt(new BN(poolUsdt98Percent)));
+    assert(usdtAmountDiff.lt(new BN(poolUsdt99Percent)));
+  });
+
+  it('should withdraw 5% of shares', async () => {
     const poolInfoBefore = await global.refContract.get_stable_pool({
       pool_id: 0,
     });
@@ -1494,14 +1577,9 @@ describe('Withdraw Stable Pool', async function () {
       account_id: config.usnId,
       token_id: config.wnearId,
     });
-    const wrapAmount = await global.wnearContract.ft_balance_of({
-      account_id: config.usnId,
-    });
-
     assert.equal(usnDeposit, '0');
     assert.equal(usdtDeposit, '0');
     assert.equal(wrapDeposit, '0');
-    assert.equal(wrapAmount, '0');
 
     assert(
       new BN(poolInfoBefore.amounts[0]).gt(new BN(poolInfoAfter.amounts[0]))

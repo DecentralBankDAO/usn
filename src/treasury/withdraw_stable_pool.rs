@@ -21,7 +21,7 @@ impl Contract {
     /// collateralization on the static accounts of USDT and USN contracts
     ///
     /// It fails if 'usn' is the only liquidity provider in the stable pool.
-    pub fn withdraw_stable_pool(&mut self) -> Promise {
+    pub fn withdraw_stable_pool(&mut self, percent: Option<u8>) -> Promise {
         self.assert_owner();
 
         let pool = Pool::stable_pool();
@@ -40,6 +40,7 @@ impl Contract {
             GAS_FOR_GET_SHARES,
         )
         .then(ext_self::handle_start_removing(
+            percent,
             env::current_account_id(),
             env::attached_deposit(),
             GAS_SURPLUS * 6
@@ -54,7 +55,7 @@ impl Contract {
 trait RefFinanceHandler {
     #[private]
     #[payable]
-    fn handle_start_removing(&mut self, #[callback] shares: U128) -> Promise;
+    fn handle_start_removing(&mut self, percent: Option<u8>, #[callback] shares: U128) -> Promise;
 
     #[private]
     #[payable]
@@ -65,7 +66,7 @@ trait RefFinanceHandler {
 }
 
 trait RefFinanceHandler {
-    fn handle_start_removing(&mut self, shares: U128) -> Promise;
+    fn handle_start_removing(&mut self, percent: Option<u8>, shares: U128) -> Promise;
 
     fn handle_remove_deposit(&mut self, amounts: Vec<U128>) -> Promise;
 
@@ -76,7 +77,7 @@ trait RefFinanceHandler {
 impl RefFinanceHandler for Contract {
     #[private]
     #[payable]
-    fn handle_start_removing(&mut self, #[callback] shares: U128) -> Promise {
+    fn handle_start_removing(&mut self, percent: Option<u8>, #[callback] shares: U128) -> Promise {
         let pool = Pool::stable_pool();
         let min_amounts = vec![U128(0), U128(0)];
 
@@ -86,8 +87,12 @@ impl RefFinanceHandler for Contract {
             "Requires exactly 3 yoctoNEAR of attached deposit"
         );
 
-        // 5% of shares
-        let shares_amount = U256::from(u128::from(shares)) * U256::from(5u128) / 100u128;
+        // 5% of shares by default, but 100% is maximum.
+        let percent = percent.unwrap_or(5);
+
+        require!(percent <= 100, "Maximum 100% of shares can be withdrawn");
+
+        let shares_amount = U256::from(u128::from(shares)) * U256::from(percent) / 100u128;
 
         ext_ref_finance::remove_liquidity(
             pool.id,

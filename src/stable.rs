@@ -3,7 +3,7 @@ use crate::*;
 use near_sdk::{collections::UnorderedMap, IntoStorageKey};
 
 const USDT_DECIMALS: u8 = 6;
-const COMMISSION_INTEREST: u128 = 1000;
+const COMMISSION_INTEREST: u128 = 100; // 0.0001 = 0.01%
 
 pub fn usdt_id() -> AccountId {
     if cfg!(feature = "mainnet") {
@@ -117,7 +117,7 @@ impl StableTreasury {
         let mut token_info = self.stable_token.get(token_id).unwrap();
 
         let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
-        let commission = amount * COMMISSION_INTEREST / spread_denominator; // amount * 0.001
+        let commission = amount * COMMISSION_INTEREST / spread_denominator; // amount * 0.0001
         token_info.commission = (token_info.commission.0 + commission).into();
         self.stable_token.insert(token_id, &token_info);
 
@@ -178,10 +178,10 @@ mod tests {
     #[test]
     fn test_calculate_commission() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        let amount_with_fee = treasury.withdraw_commission(&usdt_id(), 10000);
-        assert_eq!(amount_with_fee, 9990);
+        let amount_with_fee = treasury.withdraw_commission(&usdt_id(), 100000);
+        assert_eq!(amount_with_fee, 99990);
         assert_eq!(treasury.supported_tokens()[0].1.commission, U128(10));
-        treasury.withdraw_commission(&usdt_id(), 10000);
+        treasury.withdraw_commission(&usdt_id(), 100000);
         assert_eq!(treasury.supported_tokens()[0].1.commission, U128(20));
     }
 
@@ -200,7 +200,7 @@ mod tests {
 
         treasury.add_token(&accounts(2), 20);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 1000000);
-        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 9990);
+        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 9999);
     }
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
         treasury.add_token(&accounts(2), 8);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();
-        assert_eq!(usn_amount, 999000000000000);
+        assert_eq!(usn_amount, 999900000000000);
 
         treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
         assert!(token.accounts.get(&accounts(1)).is_none());
@@ -224,7 +224,7 @@ mod tests {
 
         treasury.add_token(&accounts(2), 8);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
-        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 999000000000000);
+        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 999900000000000);
 
         token.internal_withdraw(&accounts(1), 1000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();

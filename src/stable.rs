@@ -45,11 +45,19 @@ pub fn dai_id() -> AccountId {
     CONFIG.dai_id.parse().unwrap()
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub enum StableStatus {
+    Active,
+    Disabled,
+}
+
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct StableInfo {
     decimals: u8,
     commission: U128,
+    status: StableStatus,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -78,13 +86,25 @@ impl StableTreasury {
         let token_info = StableInfo {
             decimals,
             commission: U128(0),
+            status: StableStatus::Active,
         };
         self.stable_token.insert(token_id, &token_info);
     }
 
-    pub fn remove_token(&mut self, token_id: &AccountId) {
-        self.assert_asset(token_id);
-        self.stable_token.remove(&token_id);
+    pub fn enable_token(&mut self, token_id: &AccountId) {
+        self.assert_asset(&token_id);
+        self.assert_status(&token_id, StableStatus::Disabled);
+        let mut token_info = self.stable_token.get(token_id).unwrap();
+        token_info.status = StableStatus::Active;
+        self.stable_token.insert(token_id, &token_info);
+    }
+
+    pub fn disable_token(&mut self, token_id: &AccountId) {
+        self.assert_asset(&token_id);
+        self.assert_status(&token_id, StableStatus::Active);
+        let mut token_info = self.stable_token.get(token_id).unwrap();
+        token_info.status = StableStatus::Disabled;
+        self.stable_token.insert(token_id, &token_info);
     }
 
     pub fn supported_tokens(&self) -> Vec<(AccountId, StableInfo)> {
@@ -99,6 +119,7 @@ impl StableTreasury {
         token_amount: Balance,
     ) {
         self.assert_asset(token_id);
+        self.assert_status(&token_id, StableStatus::Active);
         let token = self.stable_token.get(token_id).unwrap();
         let amount = self.convert_decimals(token_amount, token.decimals, USN_DECIMALS);
         let amount_with_fee = self.withdraw_commission(token_id, amount);
@@ -114,6 +135,7 @@ impl StableTreasury {
         amount: Balance,
     ) -> u128 {
         self.assert_asset(&token_id);
+        self.assert_status(&token_id, StableStatus::Active);
         let token = self.stable_token.get(token_id).unwrap();
         let token_amount = self.convert_decimals(amount, USN_DECIMALS, token.decimals);
         assert_ne!(
@@ -140,6 +162,12 @@ impl StableTreasury {
     fn assert_asset(&self, token_id: &AccountId) {
         if !self.stable_token.get(token_id).is_some() {
             env::panic_str(&format!("Asset {} is not supported", token_id));
+        }
+    }
+
+    fn assert_status(&self, token_id: &AccountId, status: StableStatus) {
+        if self.stable_token.get(token_id).unwrap().status != status {
+            env::panic_str(&format!("Asset {} is currently not {:?}", token_id, status));
         }
     }
 
@@ -176,8 +204,26 @@ mod tests {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         treasury.add_token(&accounts(1), 20);
         assert!(treasury.stable_token.get(&accounts(1)).is_some());
-        treasury.remove_token(&accounts(1));
-        assert!(treasury.stable_token.get(&accounts(1)).is_none());
+    }
+
+    #[test]
+    fn test_enable_disable_tokens() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        treasury.add_token(&accounts(1), 20);
+        assert_eq!(
+            treasury.supported_tokens()[3].1.status,
+            StableStatus::Active
+        );
+        treasury.disable_token(&accounts(1));
+        assert_eq!(
+            treasury.supported_tokens()[3].1.status,
+            StableStatus::Disabled
+        );
+        treasury.enable_token(&accounts(1));
+        assert_eq!(
+            treasury.supported_tokens()[3].1.status,
+            StableStatus::Active
+        );
     }
 
     #[test]
@@ -194,8 +240,6 @@ mod tests {
         treasury.add_token(&accounts(1), 20);
         assert_eq!(treasury.supported_tokens().len(), 4);
         assert_eq!(treasury.supported_tokens()[3].0, accounts(1));
-        treasury.remove_token(&accounts(1));
-        assert_eq!(treasury.supported_tokens().len(), 3);
     }
 
     #[test]
@@ -225,6 +269,15 @@ mod tests {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 10000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Asset usdt.test.near is currently not Active")]
+    fn test_deposit_not_active_asset() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
+        treasury.disable_token(&usdt_id());
+        treasury.deposit(&mut token, &accounts(2), &usdt_id(), 10000);
     }
 
     #[test]

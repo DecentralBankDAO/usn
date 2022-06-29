@@ -1152,9 +1152,14 @@ impl Contract {
         self.stable_treasury.add_token(token_id, decimals);
     }
 
-    pub fn remove_stable_asset(&mut self, token_id: &AccountId) {
+    pub fn enable_stable_asset(&mut self, token_id: &AccountId) {
         self.assert_owner();
-        self.stable_treasury.remove_token(token_id);
+        self.stable_treasury.enable_token(token_id);
+    }
+
+    pub fn disable_stable_asset(&mut self, token_id: &AccountId) {
+        self.assert_owner();
+        self.stable_treasury.disable_token(token_id);
     }
 
     pub fn stable_assets(&self) -> Vec<(AccountId, StableInfo)> {

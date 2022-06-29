@@ -4,6 +4,7 @@ mod ft;
 mod history;
 mod oracle;
 mod owner;
+mod stable;
 mod storage;
 mod treasury;
 
@@ -11,6 +12,7 @@ use near_contract_standards::fungible_token::core::FungibleTokenCore;
 use near_contract_standards::fungible_token::metadata::{
     FungibleTokenMetadata, FungibleTokenMetadataProvider, FT_METADATA_SPEC,
 };
+use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use near_contract_standards::fungible_token::resolver::FungibleTokenResolver;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
@@ -18,10 +20,9 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     assert_one_yocto, env, ext_contract, is_promise_success, near_bindgen, sys, AccountId, Balance,
-    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseOrValue, Timestamp,
+    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseOrValue, ONE_YOCTO,
 };
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
@@ -30,6 +31,7 @@ use oracle::{
     ExchangeRate, ExchangeRateValue, ExchangeRates, Oracle, PriceData, DEFAULT_RATE_DECIMALS,
 };
 use partial_min_max;
+use stable::{usdt_id, StableInfo, StableTreasury};
 use treasury::TreasuryData;
 
 uint::construct_uint!(
@@ -42,6 +44,7 @@ const GAS_FOR_REFUND_PROMISE: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_BUY_PROMISE: Gas = Gas(10_000_000_000_000);
 const GAS_FOR_SELL_PROMISE: Gas = Gas(15_000_000_000_000);
 const GAS_FOR_RETURN_VALUE_PROMISE: Gas = Gas(5_000_000_000_000);
+const GAS_FOR_FT_TRANSFER: Gas = Gas(25_000_000_000_000);
 
 const MAX_SPREAD: Balance = 50_000; // 0.05 = 5%
 const SPREAD_DECIMAL: u8 = 6;
@@ -54,6 +57,7 @@ enum StorageKey {
     TokenMetadata,
     Blacklist,
     TreasuryData,
+    StableTreasury,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -187,10 +191,21 @@ pub struct Contract {
     usn2near: VolumeHistory,
     near2usn: VolumeHistory,
     best_rate: MinMaxRate,
+    stable_treasury: StableTreasury,
 }
 
 const DATA_IMAGE_SVG_NEAR_ICON: &str =
     "data:image/svg+xml;charset=UTF-8,%3Csvg width='38' height='38' viewBox='0 0 38 38' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='38' height='38' rx='19' fill='black'/%3E%3Cpath d='M14.8388 10.6601C14.4203 10.1008 13.6748 9.86519 12.9933 10.0768C12.3119 10.2885 11.85 10.8991 11.85 11.5883V14.7648H8V17.9412H11.85V20.0589H8V23.2353H11.85V28H15.15V16.5108L23.1612 27.2165C23.5797 27.7758 24.3252 28.0114 25.0067 27.7997C25.6881 27.5881 26.15 26.9775 26.15 26.2882V23.2353H30V20.0589H26.15V17.9412H30V14.7648H26.15V10.0001H22.85V21.3658L14.8388 10.6601Z' fill='white'/%3E%3C/svg%3E";
+
+#[ext_contract(ext_ft_api)]
+pub trait FtApi {
+    fn ft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+    ) -> PromiseOrValue<U128>;
+}
 
 #[ext_contract(ext_self)]
 trait ContractCallback {
@@ -217,6 +232,14 @@ trait ContractCallback {
 
     #[private]
     fn return_value(&mut self, value: U128) -> U128;
+
+    #[private]
+    fn handle_withdraw_refund(
+        &mut self,
+        account_id: AccountId,
+        token_id: AccountId,
+        token_amount: U128,
+    );
 }
 
 trait ContractCallback {
@@ -239,6 +262,13 @@ trait ContractCallback {
     fn handle_refund(&mut self, account: AccountId, attached_deposit: U128);
 
     fn return_value(&mut self, value: U128) -> U128;
+
+    fn handle_withdraw_refund(
+        &mut self,
+        account_id: AccountId,
+        token_id: AccountId,
+        token_amount: U128,
+    );
 }
 
 #[near_bindgen]
@@ -293,6 +323,27 @@ impl ContractCallback for Contract {
         // TODO: Remember lost value? Unlikely to happen, and only by user error.
         value
     }
+
+    #[private]
+    fn handle_withdraw_refund(
+        &mut self,
+        account_id: AccountId,
+        token_id: AccountId,
+        token_amount: U128,
+    ) {
+        if !is_promise_success() {
+            self.stable_treasury.deposit(
+                &mut self.token,
+                &account_id,
+                &token_id,
+                token_amount.into(),
+            );
+            env::log_str(&format!(
+                "Refund ${} of {} to {}",
+                token_amount.0, token_id, account_id
+            ));
+        }
+    }
 }
 
 #[near_bindgen]
@@ -325,6 +376,7 @@ impl Contract {
             usn2near: VolumeHistory::new(),
             near2usn: VolumeHistory::new(),
             best_rate: MinMaxRate::default(),
+            stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
         };
 
         this
@@ -622,7 +674,7 @@ impl Contract {
     #[payable]
     pub fn buy(&mut self, expected: Option<ExpectedRate>, to: Option<AccountId>) {
         self.abort_if_pause();
-        self.abort_if_blacklisted();
+        self.abort_if_blacklisted(&env::predecessor_account_id());
 
         let near = env::attached_deposit();
 
@@ -690,7 +742,7 @@ impl Contract {
     pub fn sell(&mut self, amount: U128, expected: Option<ExpectedRate>) -> Promise {
         assert_one_yocto();
         self.abort_if_pause();
-        self.abort_if_blacklisted();
+        self.abort_if_blacklisted(&env::predecessor_account_id());
 
         let amount = Balance::from(amount);
 
@@ -896,33 +948,10 @@ impl Contract {
             metadata: LazyOption<FungibleTokenMetadata>,
             black_list: LookupMap<AccountId, BlackListStatus>,
             status: ContractStatus,
-            oracle: OldOracle,
+            oracle: Oracle,
             spread: Spread,
             commission: Commission,
-            treasury: LazyOption<OldTreasuryData>,
-        }
-
-        #[derive(BorshSerialize, BorshDeserialize)]
-        pub struct OldOracle {
-            pub last_report: Option<ExchangeRate>,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        pub struct OldTreasuryData {
-            pub reserve: HashMap<AccountId, U128>,
-            pub cache: OldIntervalCache,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        pub struct OldIntervalCache {
-            pub items: Vec<OldCacheItem>,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        pub struct OldCacheItem {
-            pub timestamp: Timestamp,
-            pub value: f64,
-            pub n: u8,
+            treasury: LazyOption<TreasuryData>,
         }
 
         let contract: OldContract = env::state_read().expect("Contract is not initialized");
@@ -942,6 +971,7 @@ impl Contract {
             usn2near: VolumeHistory::new(),
             near2usn: VolumeHistory::new(),
             best_rate: MinMaxRate::default(),
+            stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
         }
     }
 
@@ -951,9 +981,8 @@ impl Contract {
         }
     }
 
-    fn abort_if_blacklisted(&self) {
-        let account_id = env::predecessor_account_id();
-        if self.blacklist_status(&account_id) != BlackListStatus::Allowable {
+    fn abort_if_blacklisted(&self, account_id: &AccountId) {
+        if self.blacklist_status(account_id) != BlackListStatus::Allowable {
             env::panic_str(&format!("Account '{}' is banned", account_id));
         }
     }
@@ -1006,7 +1035,7 @@ impl FungibleTokenCore for Contract {
     #[payable]
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) {
         self.abort_if_pause();
-        self.abort_if_blacklisted();
+        self.abort_if_blacklisted(&env::predecessor_account_id());
         self.token.ft_transfer(receiver_id, amount, memo);
     }
 
@@ -1019,7 +1048,7 @@ impl FungibleTokenCore for Contract {
         msg: String,
     ) -> PromiseOrValue<U128> {
         self.abort_if_pause();
-        self.abort_if_blacklisted();
+        self.abort_if_blacklisted(&env::predecessor_account_id());
         self.token
             .ft_transfer_call(receiver_id.clone(), amount, memo, msg)
     }
@@ -1057,6 +1086,79 @@ impl FungibleTokenResolver for Contract {
 impl FungibleTokenMetadataProvider for Contract {
     fn ft_metadata(&self) -> FungibleTokenMetadata {
         self.metadata.get().unwrap()
+    }
+}
+
+#[near_bindgen]
+impl FungibleTokenReceiver for Contract {
+    fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
+        self.abort_if_pause();
+        self.abort_if_blacklisted(&sender_id);
+
+        // Empty message is used for stable coin depositing.
+        assert!(msg.is_empty());
+
+        let token_id = env::predecessor_account_id();
+
+        self.stable_treasury
+            .deposit(&mut self.token, &sender_id, &token_id, amount.into());
+
+        // Unused tokens: 0.
+        PromiseOrValue::Value(U128(0))
+    }
+}
+
+#[near_bindgen]
+impl Contract {
+    #[payable]
+    pub fn withdraw(&mut self, token_id: Option<AccountId>, amount: U128) -> Promise {
+        let account_id = env::predecessor_account_id();
+        let token_id = token_id.unwrap_or(usdt_id());
+
+        assert_one_yocto();
+        self.abort_if_pause();
+        self.abort_if_blacklisted(&account_id);
+
+        let token_amount =
+            self.stable_treasury
+                .withdraw(&mut self.token, &account_id, &token_id, amount.into());
+
+        ext_ft_api::ft_transfer(
+            account_id.clone(),
+            token_amount.into(),
+            None,
+            token_id.clone(),
+            ONE_YOCTO,
+            GAS_FOR_FT_TRANSFER,
+        )
+        .as_return()
+        .then(ext_self::handle_withdraw_refund(
+            account_id,
+            token_id,
+            amount,
+            env::current_account_id(),
+            NO_DEPOSIT,
+            GAS_FOR_REFUND_PROMISE,
+        ))
+    }
+
+    pub fn add_stable_asset(&mut self, token_id: &AccountId, decimals: u8) {
+        self.assert_owner();
+        self.stable_treasury.add_token(token_id, decimals);
+    }
+
+    pub fn remove_stable_asset(&mut self, token_id: &AccountId) {
+        self.assert_owner();
+        self.stable_treasury.remove_token(token_id);
+    }
+
+    pub fn stable_assets(&self) -> Vec<(AccountId, StableInfo)> {
+        self.stable_treasury.supported_tokens()
     }
 }
 
@@ -1520,9 +1622,8 @@ mod tests {
 
     #[test]
     pub fn test_buy_sell_price() {
-        let mut context = get_context(accounts(1));
+        let context = get_context(accounts(1));
         testing_env!(context.build());
-
         let mut contract = Contract::new(accounts(1));
 
         //
@@ -1541,10 +1642,12 @@ mod tests {
             ),
             10_123393800000000000 // 10.234 USN
         );
+    }
 
-        //
-        // Best rate test
-        //
+    #[test]
+    pub fn test_best_rate() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
         let current1 = ExchangeRate::test_create_rate(82004, 28);
         let smooth1 = ExchangeRate::test_create_rate(820141234, 32);
@@ -1571,11 +1674,17 @@ mod tests {
             contract.finish_sell(accounts(1), 10 * ONE_USN, None, rates.clone()),
             1219304021264662130855707
         );
+    }
 
-        //
-        // History test
-        //
+    #[test]
+    pub fn test_history() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
+
+        let current1 = ExchangeRate::test_create_rate(82004, 28);
+        let smooth1 = ExchangeRate::test_create_rate(82014, 28);
+        let rates = ExchangeRates::new(current1, smooth1);
 
         let fresh_rates = ExchangeRates::test_fresh_rate();
         let expected_rate: ExpectedRate = fresh_rates.clone().current.into();

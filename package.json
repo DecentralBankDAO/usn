@@ -11,9 +11,9 @@
     "upgrade": "node scripts/upgrade.js",
     "upgrade:sandbox": "npm run upgrade",
     "upgrade:testnet": "NEAR_ENV=testnet npm run upgrade",
-    "sandbox:init": "rm -rf /tmp/near-usn-sandbox && near-sandbox --home /tmp/near-usn-sandbox init",
-    "sandbox": "near-sandbox --home /tmp/near-usn-sandbox run",
-    "sandbox:test": "rm -rf /tmp/near-usn-test-sandbox && near-sandbox --home /tmp/near-usn-test-sandbox init && near-sandbox --home /tmp/near-usn-test-sandbox run",
+    "sandbox:init": "rm -rf ${SANDBOX_DIR:-/tmp/near-usn-sandbox} && near-sandbox --home ${SANDBOX_DIR:-/tmp/near-usn-sandbox} init",
+    "sandbox": "near-sandbox --home ${SANDBOX_DIR:-/tmp/near-usn-sandbox} run",
+    "sandbox:test": "rm -rf ${SANDBOX_DIR:-/tmp/near-usn-test-sandbox} && near-sandbox --home ${SANDBOX_DIR:-/tmp/near-usn-test-sandbox} init && near-sandbox --home ${SANDBOX_DIR:-/tmp/near-usn-test-sandbox} run",
     "pretest": "npm run build",
     "test": "mocha --require tests/sandbox-start.js --require tests/sandbox-setup.js tests"
   },

@@ -6,10 +6,12 @@ const portUsed = require('port-used');
 
 process.env.NEAR_NO_LOGS = 'defined';
 
+const port = process.env.SANDBOX_PORT || 3030;
+
 const config = {
   networkId: 'sandbox',
   domain: '0.0.0.0',
-  port: 3030,
+  port: port,
   keyPath: '/tmp/near-usn-test-sandbox/validator_key.json',
   usnPath: './target/wasm32-unknown-unknown/sandbox/usn.wasm',
   usdtPath: './tests/test_token.wasm',

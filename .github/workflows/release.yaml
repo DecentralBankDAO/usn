@@ -5,6 +5,10 @@ on:
     tags:
       - v*
 
+env:
+  SANDBOX_PORT: 3031
+  SANDBOX_DIR: '/tmp/near-usn-test-release-sandbox'
+
 jobs:
   test:
     uses: ./.github/workflows/test.yaml

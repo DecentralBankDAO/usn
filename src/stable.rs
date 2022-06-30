@@ -5,7 +5,7 @@ use near_sdk::{collections::UnorderedMap, IntoStorageKey};
 const USDT_DECIMALS: u8 = 6;
 const USDC_DECIMALS: u8 = 6;
 const DAI_DECIMALS: u8 = 18;
-const COMMISSION_INTEREST: u128 = 100; // 0.0001 = 0.01%
+const COMMISSION_INTEREST: u128 = 500; // 0.0005 = 0.05%
 
 pub struct StableConfig {
     pub usdt_id: &'static str,
@@ -257,10 +257,10 @@ mod tests {
     fn test_calculate_commission() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         let amount_with_fee = treasury.withdraw_commission(&usdt_id(), 100000);
-        assert_eq!(amount_with_fee, 99990);
-        assert_eq!(treasury.supported_tokens()[0].1.commission, U128(10));
+        assert_eq!(amount_with_fee, 99950);
+        assert_eq!(treasury.supported_tokens()[0].1.commission, U128(50));
         treasury.withdraw_commission(&usdt_id(), 100000);
-        assert_eq!(treasury.supported_tokens()[0].1.commission, U128(20));
+        assert_eq!(treasury.supported_tokens()[0].1.commission, U128(100));
     }
 
     #[test]
@@ -287,7 +287,7 @@ mod tests {
 
         treasury.add_token(&accounts(2), 20);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 1000000);
-        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 9999);
+        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 9995);
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod tests {
         treasury.add_token(&accounts(2), 8);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();
-        assert_eq!(usn_amount, 999900000000000);
+        assert_eq!(usn_amount, 999500000000000);
 
         treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
         assert!(token.accounts.get(&accounts(1)).is_none());
@@ -311,7 +311,7 @@ mod tests {
 
         treasury.add_token(&accounts(2), 8);
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
-        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 999900000000000);
+        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 999500000000000);
 
         token.internal_withdraw(&accounts(1), 1000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();

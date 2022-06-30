@@ -1,0 +1,10 @@
+@startuml
+
+title Alice obtains USN for USDT
+
+Alice->USDT: ft_transfer_call(amount)
+USDT->USN2: amount of USDT
+USN2->USN2: mints USN for Alice
+USN2->USDT: gets back
+USDT->Alice: gets back
+@enduml

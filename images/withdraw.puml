@@ -1,0 +1,10 @@
+@startuml
+
+title Alice withdraws USDT for USN
+
+Alice->USN2: withdraw(USN amount)
+USN2->USN2: burns USN of Alice
+USN2->USDT: ft_transfer(amount) to Alice
+USDT->USN2: handles an error
+USN2->Alice: returns the result
+@enduml

@@ -20,21 +20,17 @@ The specific part of the USN contract is `buy`/`sell` methods of NEAR/USD exchan
 
 # How It Works
 
-## Buy USN for NEAR
+## Obtain USN for USDT
 
-_Method:_ `buy`
+_Method:_ `ft_transfer_call`
 
-<img alt="Buy USN" src="images/buy.svg" />
+<img alt="Deposit USDT" src="images/deposit.svg" />
 
-## Sell USN for NEAR with `sell` API
+## Withdraw USDT with `withdraw` API
 
-_Method:_ `sell`
+_Method:_ `withdraw`
 
-<img alt="Sell USN" src="images/sell.svg" />
-
-## Slippage
-
-Methods `buy` and `sell` requires the _expected_ exchange rate to avoid slippage. If the price suddenly changes (slips) out of the expected deviation the USN contract aborts the transaction.
+<img alt="Withdraw USDT" src="images/withdraw.svg" />
 
 # Build
 
@@ -114,52 +110,14 @@ Add a guardian
 near call usdn.testnet extend_guardians --accountId usdn.testnet --args '{"guardians": ["alice.testnet"]}'
 ```
 
-Buy and sell
+Deposit and withdraw
 
 ```bash
-# Send NEAR, buy USN.
-near call usdn.testnet buy --accountId alice.testnet --amount 1 --gas 50000000000000
+# Send USDT, mint USN.
+near call usdt.fakes.testnet ft_transfer_call --args '{"receiver_id": "usdn.testnet", "amount": "1000000", "msg": ""}' --accountId alice.testnet --amount 0.000000000000000000000001 --gas 100000000000000
 
-# Check USN balance.
-near call usdn.testnet ft_balance_of --accountId alice.testnet --args '{"account_id": "alice.testnet"}'
-
-# Sell USN, receive NEAR.
-near call usdn.testnet sell --accountId alice.testnet --args '{"amount": "118800"}' --amount 0.000000000000000000000001 --gas 50000000000000
-
-# Buy USN with slippage control
- near call usdn.testnet buy  --args '{"expected": {"multiplier": "111439", "slippage": "10", "decimals": "28" }}' --accountId alice.testnet --amount 1 --gas 50000000000000
-
-# Buy USN and transfer to someone.
-near call usdn.testnet buy --args '{"to": "bob.testnet"}' --accountId alice.testnet --amount 1 --gas 50000000000000
-```
-
-Predict Buy, Predict Sell
-```bash
-near view usdn.testnet predict_sell --args '{"amount": "10000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
-# Returns the following JSON:
-#
-# amount: '1611309938300594322359152', - amount NEAR, the user would recieve if sold USN
-# commission: {
-#   usn: '50000000000000000',          - commission in USN
-#   near: '8097034865832132273161',    - commission in NEAR
-# },
-# rate: {                              - the rate has been used for exchange
-#   "decimals": 28,
-#   "multiplier": "61751",
-# }
-
-near view usdn.testnet predict_buy --args '{"amount": "10000000000000000000000000", "rates": [{"multiplier": "61751", "decimals": 28}, {"multiplier": "61751", "decimals": 28}]}'
-# Returns the following JSON:
-#
-# amount: '61442368502000000000',     - amount USN, the user would recieve if buy USN
-# commission: {
-#   usn: '308631498000000000',        - commission in USN
-#   near: '49980000000000000000000',  - commission in NEAR
-# },
-# rate: {                             - the rate has been used for exchange
-#   "decimals": 28,
-#   "multiplier": "61751",
-# }
+# Burn USN, withdraw USDT.
+near call usdn.testnet withdraw --args '{"amount": "999500000000000000"}' --accountId alice.testnet --amount 0.000000000000000000000001 --gas 100000000000000
 ```
 
 # DAO
@@ -173,20 +131,6 @@ near view usdn.testnet predict_buy --args '{"amount": "1000000000000000000000000
    ```
 
 # API
-
-## Buy/sell USN
-
-Send NEAR, receive USN.
-
-```rust
-pub fn buy(&mut self, expected: Option<ExpectedRate>, to: Option<AccountId>);
-```
-
-Send USN, receive NEAR.
-
-```rust
-pub fn sell(&mut self, amount: U128, expected: Option<ExpectedRate>) -> Promise;
-```
 
 ## View methods
 
@@ -252,6 +196,8 @@ pub fn set_adaptive_spread(&mut self, params: Option<ExponentialSpreadParams>);
 pub fn set_owner(&mut self, owner_id: AccountId);
 pub fn extend_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
+pub fn buy(&mut self, expected: Option<ExpectedRate>, to: Option<AccountId>);
+pub fn sell(&mut self, amount: U128, expected: Option<ExpectedRate>) -> Promise;
 ```
 
 ## Upgradability

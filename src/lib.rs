@@ -1473,7 +1473,7 @@ mod tests {
             .attached_deposit(ONE_YOCTO)
             .build());
 
-        contract.withdraw(None, U128(999500000000000000000));
+        contract.withdraw(None, U128(999900000000000000000));
     }
 
     #[test]

@@ -354,20 +354,20 @@ describe('User', async function () {
     );
     assert.equal(
       await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
-      '999500000000000000000000'
+      '999900000000000000000000'
     );
 
     // Alice swaps USN to USDT.
     await global.aliceContract.withdraw({
       args: {
-        amount: '999500000000000000000000',
+        amount: '999900000000000000000000',
       },
       amount: ONE_YOCTO,
       gas: GAS_FOR_CALL,
     });
     assert.equal(
       await global.aliceUsdt.ft_balance_of({ account_id: config.aliceId }),
-      '999000250000'
+      '999800010000'
     );
     assert.equal(
       await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),

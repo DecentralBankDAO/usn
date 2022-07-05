@@ -942,43 +942,8 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        #[derive(BorshDeserialize, BorshSerialize)]
-        pub struct OldContract {
-            owner_id: AccountId,
-            proposed_owner_id: AccountId,
-            guardians: UnorderedSet<AccountId>,
-            token: FungibleTokenFreeStorage,
-            metadata: LazyOption<FungibleTokenMetadata>,
-            black_list: LookupMap<AccountId, BlackListStatus>,
-            status: ContractStatus,
-            oracle: Oracle,
-            spread: Spread,
-            commission: Commission,
-            treasury: LazyOption<TreasuryData>,
-            usn2near: VolumeHistory,
-            near2usn: VolumeHistory,
-            best_rate: MinMaxRate,
-        }
-
-        let contract: OldContract = env::state_read().expect("Contract is not initialized");
-
-        Self {
-            owner_id: contract.owner_id.clone(),
-            proposed_owner_id: contract.owner_id,
-            guardians: contract.guardians,
-            token: contract.token,
-            metadata: contract.metadata,
-            black_list: contract.black_list,
-            status: contract.status,
-            oracle: contract.oracle,
-            spread: contract.spread,
-            commission: contract.commission,
-            treasury: contract.treasury,
-            usn2near: contract.usn2near,
-            near2usn: contract.near2usn,
-            best_rate: contract.best_rate,
-            stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
-        }
+        let contract: Contract = env::state_read().expect("Contract is not initialized");
+        contract
     }
 
     fn abort_if_pause(&self) {

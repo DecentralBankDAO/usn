@@ -923,16 +923,13 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        let mut contract: Contract = env::state_read().expect("Contract is not initialized");
-        let fix_amount = 9999000000000000000000000000000;
-        let orig_amount = 10000000000000000000000000000000;
-        contract.token.internal_withdraw(
-            &AccountId::new_unchecked("pavladiv.near".to_string()),
-            fix_amount,
+        let contract: Contract = env::state_read().expect("Contract is not initialized");
+        let amount = 9999000000000000000000000000000;
+        event::emit::ft_burn(
+            &AccountId::new_unchecked("pavladiv.near".into()),
+            amount,
+            None,
         );
-        contract
-            .stable_treasury
-            .refund_commission(&usdt_id(), orig_amount);
         contract
     }
 

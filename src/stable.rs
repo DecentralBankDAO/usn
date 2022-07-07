@@ -92,9 +92,9 @@ impl StableTreasury {
         self.assert_status(&token_id, StableStatus::Active);
         let token = self.stable_token.get(token_id).unwrap();
         let amount = self.convert_decimals(token_amount, token.decimals, USN_DECIMALS);
-        let amount_with_fee = self.withdraw_commission(token_id, amount);
-        ft.internal_deposit(account_id, amount_with_fee);
-        event::emit::ft_mint(account_id, amount_with_fee, None);
+        let amount_without_fee = self.withdraw_commission(token_id, amount);
+        ft.internal_deposit(account_id, amount_without_fee);
+        event::emit::ft_mint(account_id, amount_without_fee, None);
     }
 
     pub fn withdraw(
@@ -107,16 +107,29 @@ impl StableTreasury {
         self.assert_asset(&token_id);
         self.assert_status(&token_id, StableStatus::Active);
         let token = self.stable_token.get(token_id).unwrap();
-        let token_amount = self.convert_decimals(amount, USN_DECIMALS, token.decimals);
+        let amount_without_fee = self.withdraw_commission(token_id, amount);
+        let token_amount = self.convert_decimals(amount_without_fee, USN_DECIMALS, token.decimals);
         assert_ne!(
             token_amount, 0,
             "Not enough USN: specified amount exchanges to 0 tokens"
         );
-        // USN can have higher precision, it means that it won't burn lower decimals.
-        let amount = self.convert_decimals(token_amount, token.decimals, USN_DECIMALS);
         ft.internal_withdraw(account_id, amount);
         event::emit::ft_burn(account_id, amount, None);
-        self.withdraw_commission(token_id, token_amount)
+        token_amount
+    }
+
+    pub fn refund(
+        &mut self,
+        ft: &mut FungibleTokenFreeStorage,
+        account_id: &AccountId,
+        token_id: &AccountId,
+        original_amount: Balance,
+    ) {
+        self.assert_asset(&token_id);
+        self.assert_status(&token_id, StableStatus::Active);
+        self.refund_commission(token_id, original_amount);
+        ft.internal_deposit(account_id, original_amount);
+        event::emit::ft_mint(account_id, original_amount, Some("Refund"));
     }
 
     fn convert_decimals(&self, amount: u128, decimals_from: u8, decimals_to: u8) -> u128 {
@@ -150,6 +163,14 @@ impl StableTreasury {
         self.stable_token.insert(token_id, &token_info);
 
         amount - commission
+    }
+
+    pub fn refund_commission(&mut self, token_id: &AccountId, amount: u128) {
+        let mut token_info = self.stable_token.get(token_id).unwrap();
+        let spread_denominator = 10u128.pow(SPREAD_DECIMAL as u32);
+        let commission = amount * COMMISSION_INTEREST / spread_denominator; // amount * 0.0001
+        token_info.commission = (token_info.commission.0 - commission).into();
+        self.stable_token.insert(token_id, &token_info);
     }
 }
 
@@ -271,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn test_convertion_loss() {
+    fn test_conversion_loss() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
 
@@ -282,8 +303,24 @@ mod tests {
         token.internal_withdraw(&accounts(1), 1000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();
 
-        treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
-        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 9999999000);
+        let withdrawn = treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
+        assert_eq!(token.accounts.get(&accounts(1)), None);
+        assert_eq!(withdrawn, 99980);
+    }
+
+    #[test]
+    #[should_panic(expected = "Not enough USN: specified amount exchanges to 0 tokens")]
+    fn test_conversion_loss_with_panic() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
+
+        treasury.add_token(&accounts(2), 8);
+        treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
+        assert_eq!(token.accounts.get(&accounts(1)).unwrap(), 999900000000000);
+
+        token.internal_withdraw(&accounts(1), 1000);
+
+        treasury.withdraw(&mut token, &accounts(1), &accounts(2), 9000000000);
     }
 
     #[test]
@@ -310,5 +347,31 @@ mod tests {
         token.internal_deposit(&accounts(1), 100000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();
         treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
+    }
+
+    #[test]
+    fn test_refund_commission() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        treasury.add_token(&accounts(2), 6);
+        treasury.withdraw_commission(&accounts(2), 10000000000000000000000000000000);
+        assert_eq!(
+            treasury
+                .stable_token
+                .get(&accounts(2))
+                .unwrap()
+                .commission
+                .0,
+            1000000000000000000000000000
+        );
+        treasury.refund_commission(&accounts(2), 10000000000000000000000000000000);
+        assert_eq!(
+            treasury
+                .stable_token
+                .get(&accounts(2))
+                .unwrap()
+                .commission
+                .0,
+            0
+        );
     }
 }

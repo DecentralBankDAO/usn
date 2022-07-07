@@ -234,12 +234,7 @@ trait ContractCallback {
     fn return_value(&mut self, value: U128) -> U128;
 
     #[private]
-    fn handle_withdraw_refund(
-        &mut self,
-        account_id: AccountId,
-        token_id: AccountId,
-        token_amount: U128,
-    );
+    fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
 trait ContractCallback {
@@ -263,12 +258,7 @@ trait ContractCallback {
 
     fn return_value(&mut self, value: U128) -> U128;
 
-    fn handle_withdraw_refund(
-        &mut self,
-        account_id: AccountId,
-        token_id: AccountId,
-        token_amount: U128,
-    );
+    fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
 #[near_bindgen]
@@ -325,22 +315,13 @@ impl ContractCallback for Contract {
     }
 
     #[private]
-    fn handle_withdraw_refund(
-        &mut self,
-        account_id: AccountId,
-        token_id: AccountId,
-        token_amount: U128,
-    ) {
+    fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128) {
         if !is_promise_success() {
-            self.stable_treasury.deposit(
-                &mut self.token,
-                &account_id,
-                &token_id,
-                token_amount.into(),
-            );
+            self.stable_treasury
+                .refund(&mut self.token, &account_id, &token_id, amount.into());
             env::log_str(&format!(
-                "Refund ${} of {} to {}",
-                token_amount.0, token_id, account_id
+                "Refund ${} of USN to {} after {} error",
+                amount.0, account_id, token_id,
             ));
         }
     }
@@ -942,7 +923,16 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        let contract: Contract = env::state_read().expect("Contract is not initialized");
+        let mut contract: Contract = env::state_read().expect("Contract is not initialized");
+        let fix_amount = 9999000000000000000000000000000;
+        let orig_amount = 10000000000000000000000000000000;
+        contract.token.internal_withdraw(
+            &AccountId::new_unchecked("pavladiv.near".to_string()),
+            fix_amount,
+        );
+        contract
+            .stable_treasury
+            .refund_commission(&usdt_id(), orig_amount);
         contract
     }
 

@@ -28,6 +28,7 @@ const config = {
   oracleId: 'priceoracle.test.near',
   aliceId: 'alice.test.near',
   bobId: 'bob.test.near',
+  carolId: 'carol.test.near',
 };
 
 const usnMethods = {
@@ -159,6 +160,7 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.oracleId, pubKey, config.amount);
   await masterAccount.createAccount(config.aliceId, pubKey, config.amount);
   await masterAccount.createAccount(config.bobId, pubKey, config.amount);
+  await masterAccount.createAccount(config.carolId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
   keyStore.setKey(config.networkId, config.usdtId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
@@ -166,6 +168,7 @@ async function sandboxSetup() {
   keyStore.setKey(config.networkId, config.oracleId, privKey);
   keyStore.setKey(config.networkId, config.aliceId, privKey);
   keyStore.setKey(config.networkId, config.bobId, privKey);
+  keyStore.setKey(config.networkId, config.carolId, privKey);
 
   // Deploy the USN contract.
   const wasm = await fs.readFile(config.usnPath);
@@ -357,6 +360,18 @@ async function sandboxSetup() {
 
   await bobRef.storage_deposit({ args: {}, amount: '10000000000000000000000' });
 
+  const carolAccount = new nearAPI.Account(near.connection, config.carolId);
+  const carolUsdt = new nearAPI.Contract(
+    carolAccount,
+    config.usdtId,
+    usdtMethods
+  );
+  const carolContract = new nearAPI.Contract(
+    carolAccount,
+    config.usnId,
+    usnMethods
+  );
+
   // Setup a global test context.
   global.usnAccount = usnAccount;
   global.usnContract = usnContract;
@@ -370,6 +385,8 @@ async function sandboxSetup() {
   global.bobContract = bobContract;
   global.bobUsdt = bobUsdt;
   global.usnUsdt = usnUsdt;
+  global.carolContract = carolContract;
+  global.carolUsdt = carolUsdt;
   global.bobRef = bobRef;
   global.usnWnear = usnWnear;
   global.usnRef = usnRef;

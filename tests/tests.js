@@ -390,6 +390,60 @@ describe('User', async function () {
     );
   });
 
+  it('should not withdraw having no token account', async () => {
+    // Alice gets USN.
+    await global.aliceUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: '2000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+    // Deposit $USN on ref.finance.
+    await global.aliceContract.ft_transfer({
+      args: {
+        receiver_id: config.carolId,
+        amount: '1000000000000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    assert.equal(
+      await global.carolContract.ft_balance_of({ account_id: config.carolId }),
+      '1000000000000000000'
+    );
+
+    // Try to withdraw
+    await assert.rejects(
+      async () => {
+        await global.carolContract.withdraw({
+          args: {
+            amount: '1000000000000000000',
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /not registered/);
+        return true;
+      }
+    );
+
+    assert.equal(
+      await global.carolUsdt.ft_balance_of({ account_id: config.carolId }),
+      '0'
+    );
+    assert.equal(
+      await global.carolContract.ft_balance_of({ account_id: config.carolId }),
+      '1000000000000000000'
+    );
+  });
+
   after(async () => {
     const aliceBalance = await global.aliceContract.ft_balance_of({
       account_id: config.aliceId,

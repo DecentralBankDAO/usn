@@ -207,6 +207,7 @@ pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8);
 pub fn enable_stable_asset(&mut self, asset_id: &AccountId);
 pub fn disable_stable_asset(&mut self, asset_id: &AccountId);
+pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128); 
 ```
 
 ## Upgradability

@@ -201,9 +201,17 @@ impl StableTreasury {
     }
 
     fn refund_commission(&mut self, asset_id: &AccountId, amount: u128) {
-        let mut asset_info = self.assets.get(asset_id).unwrap();
         let commission = amount * self.commission_rate as u128 / 10u128.pow(SPREAD_DECIMAL as u32);
-        asset_info.commission = (asset_info.commission.0 - commission).into();
+        self.decrease_commission(asset_id, commission);
+    }
+
+    pub fn decrease_commission(&mut self, asset_id: &AccountId, commission: u128) {
+        let mut asset_info = self.assets.get(asset_id).unwrap();
+        if let Some(commission) = asset_info.commission.0.checked_sub(commission) {
+            asset_info.commission = commission.into();
+        } else {
+            env::panic_str(&format!("Failed to decrease asset {} commission", asset_id));
+        }
         self.assets.insert(asset_id, &asset_info);
     }
 

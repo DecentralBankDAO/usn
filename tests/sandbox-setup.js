@@ -65,6 +65,7 @@ const usnMethods = {
     'unstake',
     'unstake_all',
     'withdraw_all',
+    'transfer_commission',
   ],
 };
 

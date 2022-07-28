@@ -470,6 +470,124 @@ describe('User', async function () {
   });
 });
 
+describe('Commission transfer', function () {
+  this.timeout(5000);
+
+  it('should fail being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: '10000000000'
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail trying to transfer 0 commission amount', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: '0',
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Amount should be positive/);
+        return true;
+      }
+    );
+  });
+
+  it('should transfer certain commission amount', async () => {
+    const commissionBefore = await global.usnContract.commission();
+    const transfer_amount = '10000000000';
+
+    await global.usnContract.transfer_commission({
+      args: {
+        account_id: config.aliceId,
+        amount: transfer_amount,
+      }
+    });
+
+    const commissionAfter = await global.usnContract.commission();
+    const userBalance = await global.usnContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(userBalance, transfer_amount);
+    assert(new BN(commissionBefore.v2.usn, 10)
+      .sub(new BN(transfer_amount, 10))
+      .eq(new BN(commissionAfter.v2.usn, 10)));
+  });
+
+  it('should fail trying to transfer more than account has', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: '1000000000000000000000000',
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Failed to decrease asset usdt.test.near commission/);
+        return true;
+      }
+    );
+  });
+
+  it('should transfer all commission amount', async () => {
+    const commissionBefore = await global.usnContract.commission();
+    const userBalanceBefore = await global.usnContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    await global.usnContract.transfer_commission({
+      args: {
+        account_id: config.aliceId,
+        amount: commissionBefore.v2.usn,
+      }
+    });
+
+    const commissionAfter = await global.usnContract.commission();
+    const userBalanceAfter = await global.usnContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(commissionAfter.v2.usn, '0');
+    assert(new BN(userBalanceBefore, 10)
+      .add(new BN(commissionBefore.v2.usn, 10))
+      .eq(new BN(userBalanceAfter, 10)));
+  });
+
+  it('should fail as there is no commission', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: '10000000000',
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Failed to decrease asset usdt.test.near commission/);
+        return true;
+      }
+    );
+  });
+});
+
 describe('Withdraw Stable Pool', async function () {
   this.timeout(30000);
 

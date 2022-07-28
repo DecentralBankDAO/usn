@@ -10,25 +10,25 @@ The contract implements fungible token API according to the following standards:
 2. [NEP-148](https://nomicon.io/Standards/FungibleToken/Metadata)
 3. [Fungible Token Event](https://nomicon.io/Standards/FungibleToken/Event)
 
-The specific part of the USN contract is `buy`/`sell` methods of NEAR/USD exchange with rates taken from the oracle ([priceoracle](https://github.com/NearDeFi/price-oracle/)).
-
 # Contract Address
 
-| Mainnet | Testnet      |
-| ------- | ------------ |
-| usn     | usdn.testnet |
+|         |                 |
+| ------- | --------------- |
+| Mainnet | `usn `          |
+| Testnet | `usdn.testnet`  |
+| Sandbox | `usn.test.near` |
 
 # How It Works
 
 ## Obtain USN for USDT
 
-_Method:_ `ft_transfer_call`
+_Method:_ `ft_transfer_call` (USDT) -> `ft_on_transfer` (USN)
 
 <img alt="Deposit USDT" src="images/deposit.svg" />
 
 ## Withdraw USDT with `withdraw` API
 
-_Method:_ `withdraw`
+_Method:_ `withdraw` (USN)
 
 <img alt="Withdraw USDT" src="images/withdraw.svg" />
 
@@ -60,13 +60,15 @@ For mainnet:
 npm run build:mainnet
 ```
 
-**WARNING**: There is a difference in each target. The crucial difference is that they communicate with different oracle addresses:
+**WARNING**: There is a difference in each target about the addresses for cross-contract communication.
 
-- Mainnet: `priceoracle.near`
-- Testnet: `priceoracle.testnet`
-- Sandbox: `priceoracle.test.near`
+### USDT address
 
-And all these oracle contracts report prices with different asset names.
+|         |                      |
+|---------|----------------------|
+| Mainnet | `dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near` |
+| Testnet | `usdt.fakes.testnet` |
+| Sandbox | `usdt.test.near`     |
 
 # Test
 
@@ -132,6 +134,15 @@ near call usdn.testnet withdraw --args '{"amount": "999500000000000000"}' --acco
 
 # API
 
+## Deposit/withdraw
+
+```rust
+// Deposit
+pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128>;
+// Withdraw
+pub fn withdraw(&mut self, token_id: Option<AccountId>, amount: U128) -> Promise;
+```
+
 ## View methods
 
 ```rust
@@ -139,13 +150,11 @@ pub fn contract_status(&self) -> ContractStatus;
 pub fn name(&self) -> String;
 pub fn symbol(&self) -> String;
 pub fn decimals(&self) -> u8;
-pub fn spread(&self, amount: Option<U128>) -> U128;
 pub fn version(&self) -> String;
 pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
 pub fn commission(&self) -> CommissionOutput;
-pub fn predict_sell(&self, account_id: Option<AccountId>, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
-pub fn predict_buy(&self, account_id: Option<AccountId>, amount: U128, rates: Vec<ExchangeRateValue>) -> ExchangeResultOutput;
+pub fn stable_assets(&self) -> Vec<(AccountId, StableInfo)>;
 ```
 
 ## NEP-141 (ERC-20)
@@ -162,6 +171,7 @@ pub fn ft_transfer_call(
 pub fn ft_total_supply(&self) -> U128;
 pub fn ft_balance_of(&self, account_id: AccountId) -> U128;
 pub fn ft_metadata(&self) -> FungibleTokenMetadata;
+pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128>;
 ```
 
 ## NEP-145: partial storage API
@@ -191,13 +201,12 @@ pub fn remove_from_blacklist(&mut self, account_id: &AccountId);
 pub fn destroy_black_funds(&mut self, account_id: &AccountId);
 pub fn pause(&mut self);
 pub fn resume(&mut self);
-pub fn set_fixed_spread(&mut self, spread: U128) {
-pub fn set_adaptive_spread(&mut self, params: Option<ExponentialSpreadParams>);
 pub fn set_owner(&mut self, owner_id: AccountId);
 pub fn extend_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
-pub fn buy(&mut self, expected: Option<ExpectedRate>, to: Option<AccountId>);
-pub fn sell(&mut self, amount: U128, expected: Option<ExpectedRate>) -> Promise;
+pub fn add_stable_asset(&mut self, token_id: &AccountId, decimals: u8);
+pub fn enable_stable_asset(&mut self, token_id: &AccountId);
+pub fn disable_stable_asset(&mut self, token_id: &AccountId);
 ```
 
 ## Upgradability

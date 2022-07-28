@@ -12,12 +12,4 @@ pub trait Ft {
         memo: Option<String>,
         msg: String,
     ) -> Promise;
-
-    #[payable]
-    fn near_deposit(&mut self);
-
-    #[payable]
-    fn near_withdraw(&mut self, amount: U128);
-
-    fn ft_balance_of(&self, account_id: AccountId) -> U128;
 }

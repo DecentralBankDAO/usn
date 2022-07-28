@@ -24,7 +24,7 @@ use near_sdk::{
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
-use stable::{usdt_id, StableInfo, StableTreasury};
+use stable::{usdt_id, AssetInfo, StableTreasury};
 
 uint::construct_uint!(
     pub struct U256(4);
@@ -536,30 +536,30 @@ impl FungibleTokenReceiver for Contract {
 #[near_bindgen]
 impl Contract {
     #[payable]
-    pub fn withdraw(&mut self, token_id: Option<AccountId>, amount: U128) -> Promise {
+    pub fn withdraw(&mut self, asset_id: Option<AccountId>, amount: U128) -> Promise {
         let account_id = env::predecessor_account_id();
-        let token_id = token_id.unwrap_or(usdt_id());
+        let asset_id = asset_id.unwrap_or(usdt_id());
 
         assert_one_yocto();
         self.abort_if_pause();
         self.abort_if_blacklisted(&account_id);
 
-        let token_amount =
+        let asset_amount =
             self.stable_treasury
-                .withdraw(&mut self.token, &account_id, &token_id, amount.into());
+                .withdraw(&mut self.token, &account_id, &asset_id, amount.into());
 
         ext_ft_api::ft_transfer(
             account_id.clone(),
-            token_amount.into(),
+            asset_amount.into(),
             None,
-            token_id.clone(),
+            asset_id.clone(),
             ONE_YOCTO,
             GAS_FOR_FT_TRANSFER,
         )
         .as_return()
         .then(ext_self::handle_withdraw_refund(
             account_id,
-            token_id,
+            asset_id,
             amount,
             env::current_account_id(),
             NO_DEPOSIT,
@@ -567,23 +567,23 @@ impl Contract {
         ))
     }
 
-    pub fn add_stable_asset(&mut self, token_id: &AccountId, decimals: u8) {
+    pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8) {
         self.assert_owner();
-        self.stable_treasury.add_token(token_id, decimals);
+        self.stable_treasury.add_asset(asset_id, decimals);
     }
 
-    pub fn enable_stable_asset(&mut self, token_id: &AccountId) {
+    pub fn enable_stable_asset(&mut self, asset_id: &AccountId) {
         self.assert_owner();
-        self.stable_treasury.enable_token(token_id);
+        self.stable_treasury.enable_asset(asset_id);
     }
 
-    pub fn disable_stable_asset(&mut self, token_id: &AccountId) {
+    pub fn disable_stable_asset(&mut self, asset_id: &AccountId) {
         self.assert_owner();
-        self.stable_treasury.disable_token(token_id);
+        self.stable_treasury.disable_asset(asset_id);
     }
 
-    pub fn stable_assets(&self) -> Vec<(AccountId, StableInfo)> {
-        self.stable_treasury.supported_tokens()
+    pub fn treasury(&self) -> Vec<(AccountId, AssetInfo)> {
+        self.stable_treasury.supported_assets()
     }
 }
 

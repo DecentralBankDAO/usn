@@ -140,7 +140,7 @@ near call usdn.testnet withdraw --args '{"amount": "999500000000000000"}' --acco
 // Deposit
 pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128>;
 // Withdraw
-pub fn withdraw(&mut self, token_id: Option<AccountId>, amount: U128) -> Promise;
+pub fn withdraw(&mut self, asset_id: Option<AccountId>, amount: U128) -> Promise;
 ```
 
 ## View methods
@@ -154,7 +154,7 @@ pub fn version(&self) -> String;
 pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
 pub fn commission(&self) -> CommissionOutput;
-pub fn stable_assets(&self) -> Vec<(AccountId, StableInfo)>;
+pub fn treasury(&self) -> Vec<(AccountId, StableInfo)>;
 ```
 
 ## NEP-141 (ERC-20)
@@ -204,9 +204,9 @@ pub fn resume(&mut self);
 pub fn set_owner(&mut self, owner_id: AccountId);
 pub fn extend_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
-pub fn add_stable_asset(&mut self, token_id: &AccountId, decimals: u8);
-pub fn enable_stable_asset(&mut self, token_id: &AccountId);
-pub fn disable_stable_asset(&mut self, token_id: &AccountId);
+pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8);
+pub fn enable_stable_asset(&mut self, asset_id: &AccountId);
+pub fn disable_stable_asset(&mut self, asset_id: &AccountId);
 ```
 
 ## Upgradability

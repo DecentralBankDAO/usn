@@ -38,6 +38,7 @@ const usnMethods = {
     'commission',
     'guardians',
     'blacklist_status',
+    'commission_rate',
   ],
   changeMethods: [
     'new',
@@ -57,6 +58,7 @@ const usnMethods = {
     'transfer_stable_liquidity',
     'withdraw',
     'withdraw_stable_pool',
+    'set_commission_rate',
   ],
 };
 

@@ -57,6 +57,11 @@ describe('Anyone', function () {
       usn: '0',
     });
   });
+
+  it('should get commission rate', async () => {
+    const commission_rate = await global.aliceContract.commission_rate();
+    assert.equal(commission_rate, 100);
+  });
 });
 
 describe('Owner', function () {
@@ -117,6 +122,20 @@ describe('Owner', function () {
       args: {},
     });
     assert.equal(await global.usnContract.owner(), config.usnId);
+  });
+});
+
+describe('Owner', function () {
+  this.timeout(5000);
+
+  it('should be able to change commission rate', async () => {
+    await global.usnContract.set_commission_rate({ args: { rate: 2000 } });
+    const commission_rate = await global.aliceContract.commission_rate();
+    assert.equal(commission_rate, 2000);
+  });
+
+  after(async () => {
+    await global.usnContract.set_commission_rate({ args: { rate: 100 } });
   });
 });
 

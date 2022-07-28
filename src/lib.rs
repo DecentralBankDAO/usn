@@ -13,7 +13,7 @@ use near_contract_standards::fungible_token::metadata::{
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use near_contract_standards::fungible_token::resolver::FungibleTokenResolver;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
+use near_sdk::collections::{LazyOption, LookupMap, UnorderedMap, UnorderedSet};
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
@@ -34,8 +34,6 @@ const NO_DEPOSIT: Balance = 0;
 const USN_DECIMALS: u8 = 18;
 const GAS_FOR_REFUND_PROMISE: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_FT_TRANSFER: Gas = Gas(25_000_000_000_000);
-
-const SPREAD_DECIMAL: u8 = 6;
 
 #[derive(BorshStorageKey, BorshSerialize)]
 enum StorageKey {
@@ -362,6 +360,11 @@ impl Contract {
         }
 
         #[derive(BorshDeserialize, BorshSerialize)]
+        pub struct OldStableTreasury {
+            stable_token: UnorderedMap<AccountId, AssetInfo>,
+        }
+
+        #[derive(BorshDeserialize, BorshSerialize)]
         struct PrevContract {
             owner_id: AccountId,
             proposed_owner_id: AccountId,
@@ -377,7 +380,7 @@ impl Contract {
             usn2near: VolumeHistory,
             near2usn: VolumeHistory,
             best_rate: MinMaxRate,
-            stable_treasury: StableTreasury,
+            stable_treasury: OldStableTreasury,
         }
 
         let prev: PrevContract = env::state_read().expect("Contract is not initialized");
@@ -391,7 +394,7 @@ impl Contract {
             black_list: prev.black_list,
             status: prev.status,
             commission: prev.commission,
-            stable_treasury: prev.stable_treasury,
+            stable_treasury: prev.stable_treasury.stable_token.into(),
         }
     }
 
@@ -584,6 +587,15 @@ impl Contract {
 
     pub fn treasury(&self) -> Vec<(AccountId, AssetInfo)> {
         self.stable_treasury.supported_assets()
+    }
+
+    pub fn set_commission_rate(&mut self, rate: u32) {
+        self.assert_owner();
+        self.stable_treasury.set_commission_rate(rate);
+    }
+
+    pub fn commission_rate(&self) -> u32 {
+        self.stable_treasury.commission_rate()
     }
 }
 

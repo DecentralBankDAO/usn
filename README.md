@@ -153,8 +153,8 @@ pub fn decimals(&self) -> u8;
 pub fn version(&self) -> String;
 pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
-pub fn commission(&self) -> CommissionOutput;
 pub fn treasury(&self) -> Vec<(AccountId, StableInfo)>;
+pub fn commission(&self) -> CommissionOutput;
 ```
 
 ## NEP-141 (ERC-20)

@@ -28,7 +28,7 @@ pub enum AssetStatus {
     Disabled,
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetInfo {
     decimals: u8,
@@ -49,6 +49,10 @@ impl AssetInfo {
             commission: U128(0),
             status: AssetStatus::Enabled,
         }
+    }
+
+    pub fn commission(&self) -> U128 {
+        self.commission
     }
 }
 

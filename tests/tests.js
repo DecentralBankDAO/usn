@@ -52,10 +52,17 @@ describe('Anyone', function () {
 
   it('should get a commission', async () => {
     const commission = await global.aliceContract.commission();
-    assert.deepEqual(commission, {
-      near: '0',
-      usn: '0',
-    });
+    assert.deepEqual(commission,
+      {
+        v1: {
+          near: '0',
+          usn: '0',
+        },
+        v2: {
+          usn: '0',
+        },
+      }
+    );
   });
 
   it('should get commission rate', async () => {
@@ -204,6 +211,7 @@ describe('User', async function () {
     const usdtAfter = await global.aliceUsdt.ft_balance_of({
       account_id: config.aliceId,
     });
+    const commission = await global.usnContract.commission();
 
     assert.equal(
       new BN(usdtBefore).sub(new BN(usdtAfter)).toString(),
@@ -213,6 +221,8 @@ describe('User', async function () {
       await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
       '999900000000000000000000'
     );
+    assert.equal(commission.v2.usn, '100000000000000000000');
+
 
     // Alice swaps USN to USDT.
     await global.aliceContract.withdraw({
@@ -226,6 +236,7 @@ describe('User', async function () {
     const usdtAfter2 = await global.aliceUsdt.ft_balance_of({
       account_id: config.aliceId,
     });
+    const commission2 = await global.usnContract.commission();
 
     assert.equal(
       new BN(usdtAfter2).sub(new BN(usdtAfter)).toString(),
@@ -235,6 +246,7 @@ describe('User', async function () {
       await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
       '0'
     );
+    assert.equal(commission2.v2.usn, '199990000000000000000');
   });
 
   it('should have withdrawn all USN to get unregistered', async () => {
@@ -279,6 +291,8 @@ describe('User', async function () {
       '1000000000000000000'
     );
 
+    const commissionBefore = await global.usnContract.commission();
+
     // Try to withdraw
     await assert.rejects(
       async () => {
@@ -296,6 +310,8 @@ describe('User', async function () {
       }
     );
 
+    const commissionAfter = await global.usnContract.commission();
+
     assert.equal(
       await global.carolUsdt.ft_balance_of({ account_id: config.carolId }),
       '0'
@@ -304,6 +320,7 @@ describe('User', async function () {
       await global.carolContract.ft_balance_of({ account_id: config.carolId }),
       '1000000000000000000'
     );
+    assert.equal(commissionBefore.v2.usn, commissionAfter.v2.usn);
   });
 
   after(async () => {

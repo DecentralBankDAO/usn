@@ -80,17 +80,48 @@ pub struct CommissionV1 {
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
-pub struct CommissionOutput {
+pub struct CommissionV1Output {
     usn: U128,
     near: U128,
 }
 
-impl From<CommissionV1> for CommissionOutput {
+impl From<CommissionV1> for CommissionV1Output {
     fn from(commission: CommissionV1) -> Self {
         Self {
-            usn: U128::from(commission.usn),
-            near: U128::from(commission.near),
+            usn: commission.usn.into(),
+            near: commission.near.into(),
         }
+    }
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct CommissionV2Output {
+    usn: U128,
+}
+
+impl From<&StableTreasury> for CommissionV2Output {
+    fn from(treasury: &StableTreasury) -> Self {
+        let mut commission: u128 = 0;
+        for asset in treasury.supported_assets().iter() {
+            commission += asset.1.commission().0
+        }
+        Self {
+            usn: commission.into(),
+        }
+    }
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct CommissionOutput {
+    v1: CommissionV1Output,
+    v2: CommissionV2Output,
+}
+
+impl CommissionOutput {
+    pub fn new(v1: CommissionV1Output, v2: CommissionV2Output) -> Self {
+        Self { v1, v2 }
     }
 }
 
@@ -261,7 +292,10 @@ impl Contract {
     }
 
     pub fn commission(&self) -> CommissionOutput {
-        self.commission.clone().into()
+        CommissionOutput::new(
+            self.commission.clone().into(),
+            (&self.stable_treasury).into(),
+        )
     }
 
     /// This is NOOP implementation. KEEP IT if you haven't changed contract state.
@@ -827,5 +861,69 @@ mod tests {
             .build());
 
         contract.withdraw(None, U128(999900000000000000000));
+    }
+
+    #[test]
+    fn test_view_commission() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let contract = Contract::new(accounts(1));
+        assert_eq!(contract.commission().v1.usn, U128(0));
+        assert_eq!(contract.commission().v1.near, U128(0));
+        assert_eq!(contract.commission().v2.usn, U128(0));
+    }
+
+    #[test]
+    fn test_commission() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+
+        contract
+            .stable_treasury
+            .deposit(&mut contract.token, &accounts(2), &usdt_id(), 100000);
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+
+        contract.stable_treasury.withdraw(
+            &mut contract.token,
+            &accounts(2),
+            &usdt_id(),
+            99990000000000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(19999000000000));
+
+        contract.stable_treasury.refund(
+            &mut contract.token,
+            &accounts(2),
+            &usdt_id(),
+            99990000000000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+    }
+
+    #[test]
+    fn test_commission_two_assets() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+
+        contract
+            .stable_treasury
+            .deposit(&mut contract.token, &accounts(2), &usdt_id(), 100000);
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+
+        contract.add_stable_asset(&accounts(3), 20);
+        contract.stable_treasury.deposit(
+            &mut contract.token,
+            &accounts(2),
+            &accounts(3),
+            100000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000100));
     }
 }

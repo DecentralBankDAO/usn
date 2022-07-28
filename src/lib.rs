@@ -3,6 +3,7 @@ mod event;
 mod ft;
 mod owner;
 mod stable;
+mod staking;
 mod storage;
 mod treasury;
 
@@ -602,6 +603,26 @@ impl Contract {
             NO_DEPOSIT,
             GAS_FOR_REFUND_PROMISE,
         ))
+    }
+
+    pub fn stake(&self, amount: U128) -> Promise {
+        self.assert_owner();
+        staking::stake(amount)
+    }
+
+    pub fn unstake(&self, amount: U128) -> Promise {
+        self.assert_owner();
+        staking::unstake(amount)
+    }
+
+    pub fn unstake_all(&self) -> Promise {
+        self.assert_owner();
+        staking::unstake_all()
+    }
+
+    pub fn withdraw_all(&self) -> Promise {
+        self.assert_owner();
+        staking::withdraw_all()
     }
 
     pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8) {

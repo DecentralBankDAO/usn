@@ -16,11 +16,13 @@ const config = {
   usnPath: './target/wasm32-unknown-unknown/sandbox/usn.wasm',
   usdtPath: './tests/test_token.wasm',
   refPath: './tests/ref_exchange.wasm',
+  poolPath: './tests/staking_pool.wasm',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
   masterId: 'test.near',
   usnId: 'usn.test.near',
   usdtId: 'usdt.test.near',
   refId: 'ref.test.near',
+  poolId: 'pool.test.near',
   aliceId: 'alice.test.near',
   carolId: 'carol.test.near',
 };
@@ -59,6 +61,10 @@ const usnMethods = {
     'withdraw',
     'withdraw_stable_pool',
     'set_commission_rate',
+    'stake',
+    'unstake',
+    'unstake_all',
+    'withdraw_all',
   ],
 };
 
@@ -74,6 +80,13 @@ const refMethods = {
     'storage_deposit',
     'add_stable_swap_pool',
     'extend_whitelisted_tokens',
+  ],
+};
+
+const poolMethods = {
+  viewMethods: ['get_account'],
+  changeMethods: [
+    'new'
   ],
 };
 
@@ -113,11 +126,13 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.usnId, pubKey, config.amount);
   await masterAccount.createAccount(config.usdtId, pubKey, config.amount);
   await masterAccount.createAccount(config.refId, pubKey, config.amount);
+  await masterAccount.createAccount(config.poolId, pubKey, config.amount);
   await masterAccount.createAccount(config.aliceId, pubKey, config.amount);
   await masterAccount.createAccount(config.carolId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
   keyStore.setKey(config.networkId, config.usdtId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
+  keyStore.setKey(config.networkId, config.poolId, privKey);
   keyStore.setKey(config.networkId, config.aliceId, privKey);
   keyStore.setKey(config.networkId, config.carolId, privKey);
 
@@ -158,6 +173,34 @@ async function sandboxSetup() {
   });
   await usdtContract.mint({
     args: { account_id: config.aliceId, amount: '1000000000000' },
+  });
+
+  // Deploy Staking Pool contract.
+  const wasmPool = await fs.readFile(config.poolPath);
+  const poolAccount = new nearAPI.Account(near.connection, config.poolId);
+  await poolAccount.deployContract(wasmPool);
+
+  // Initialize Staking Pool contract.
+  const poolContract = new nearAPI.Contract(
+    poolAccount,
+    config.poolId,
+    poolMethods
+  );
+
+  // TODO Discover the reward and burn fee
+  await poolContract.new({
+    args: {
+      owner_id: config.poolId,
+      stake_public_key: keyFile.public_key,
+      reward_fee_fraction: {
+        numerator: 0,
+        denominator: 100,
+      },
+      burn_fee_fraction: {
+        numerator: 0,
+        denominator: 100,
+      },
+    }
   });
 
   // Deploy Ref.Finance (ref-exchange) contract.
@@ -226,6 +269,7 @@ async function sandboxSetup() {
   global.usnContract = usnContract;
   global.usdtContract = usdtContract;
   global.refContract = refContract;
+  global.poolContract = poolContract;
   global.aliceAccount = aliceAccount;
   global.aliceUsdt = aliceUsdt;
   global.aliceContract = aliceContract;

@@ -6,6 +6,7 @@ const BN = require('bn.js');
 
 const ONE_YOCTO = '1';
 const GAS_FOR_CALL = '200000000000000'; // 200 TGas
+const ONE_NEAR = '1000000000000000000000000';
 
 describe('Smoke Test', function () {
   it('should get a version', async () => {
@@ -535,5 +536,183 @@ describe('Withdraw Stable Pool', async function () {
 
     assert(usdtAmountDiff.gt(new BN(poolUsdt49Percent)));
     assert(usdtAmountDiff.lte(new BN(poolUsdt5Percent)));
+  });
+});
+
+describe('Staking Pool', async function () {
+  this.timeout(30000);
+
+  it('should fail being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.stake({
+          args: {
+            amount: ONE_NEAR,
+          },
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail as nothing was staked', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.unstake({
+          args: {
+            amount: ONE_NEAR,
+          },
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Unstaking amount should be positive/);
+        return true;
+      }
+    );
+  });
+
+  it('should stake certain amount of NEAR', async () => {
+    const nearBalanceBefore = await global.usnAccount.state();
+    const stakeAmount = "10000000000000000000000000"; // 10 NEAR
+
+    await global.usnContract.stake({
+      args: {
+        amount: stakeAmount,
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const nearBalanceAfter = await global.usnAccount.state();
+    const usnStakeInfo = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    assert(new BN(usnStakeInfo.staked_balance, 10).eq(new BN(stakeAmount, 10)));
+    assert(new BN(nearBalanceBefore.amount, 10).sub(new BN(nearBalanceAfter.amount, 10)).gt(new BN(stakeAmount, 10)));
+  });
+
+  it('should fail trying to stake more than account has', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.stake({
+          args: {
+            amount: '4000000000000000000000000000', // 400 NEAR
+          },
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /The account doesn't have enough balance/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail to withdraw as there is no unstaked balance', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.withdraw_all({
+          args: {},
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Withdrawal amount should be positive/);
+        return true;
+      }
+    );
+  });
+
+  it('should unstake certain amount', async () => {
+    const unstakeAmount = ONE_NEAR;
+    const usnStakeInfoBefore = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    await global.usnContract.unstake({
+      args: {
+        amount: unstakeAmount,
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const usnStakeInfoAfter = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    assert(new BN(usnStakeInfoBefore.staked_balance, 10).sub(new BN(unstakeAmount, 10)).eq(new BN(usnStakeInfoAfter.staked_balance, 10)));
+    assert(new BN(usnStakeInfoAfter.unstaked_balance, 10).eq(new BN(unstakeAmount, 10)));
+  });
+
+  it('should unstake all in case specifying bigger amount', async () => {
+    const usnStakeInfoBefore = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    await global.usnContract.unstake({
+      args: {
+        amount: '4000000000000000000000000000', // 400 NEAR
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const usnStakeInfoAfter = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    assert(new BN(usnStakeInfoAfter.staked_balance, 10).eq(new BN(0)));
+    assert(new BN(usnStakeInfoAfter.unstaked_balance, 10)
+      .sub(new BN(usnStakeInfoBefore.unstaked_balance, 10))
+      .eq(new BN(usnStakeInfoBefore.staked_balance, 10)));
+  });
+
+  it('should unstake all', async () => {
+    const stakeAmount = "10000000000000000000000000"; // 10 NEAR
+
+    await global.usnContract.stake({
+      args: {
+        amount: stakeAmount,
+      },
+      gas: GAS_FOR_CALL,
+    });
+
+    const usnStakeInfoBefore = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+    assert(new BN(usnStakeInfoBefore.staked_balance, 10).eq(new BN(stakeAmount, 10)));
+
+    await global.usnContract.unstake_all({
+      args: {},
+      gas: GAS_FOR_CALL,
+    });
+
+    const usnStakeInfoAfter = await global.poolContract.get_account({
+      account_id: config.usnId,
+    });
+
+    assert(new BN(usnStakeInfoAfter.staked_balance, 10).eq(new BN(0)));
+    assert(new BN(usnStakeInfoAfter.unstaked_balance, 10)
+      .sub(new BN(usnStakeInfoBefore.unstaked_balance, 10))
+      .eq(new BN(usnStakeInfoBefore.staked_balance, 10)));
+  });
+
+  it('should forbid withdraw as to delay', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.withdraw_all({
+          args: {},
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /The unstaked balance is not yet available due to unstaking delay/);
+        return true;
+      }
+    );
   });
 });

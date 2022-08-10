@@ -823,6 +823,7 @@ describe('Staking Pool', async function () {
         await global.aliceContract.stake({
           args: {
             amount: ONE_NEAR,
+            pool_id: config.poolId,
           },
           gas: GAS_FOR_CALL,
         });
@@ -840,6 +841,7 @@ describe('Staking Pool', async function () {
         await global.usnContract.unstake({
           args: {
             amount: ONE_NEAR,
+            pool_id: config.poolId,
           },
           gas: GAS_FOR_CALL,
         });
@@ -858,6 +860,7 @@ describe('Staking Pool', async function () {
     await global.usnContract.stake({
       args: {
         amount: stakeAmount,
+        pool_id: config.poolId,
       },
       gas: GAS_FOR_CALL,
     });
@@ -877,6 +880,7 @@ describe('Staking Pool', async function () {
         await global.usnContract.stake({
           args: {
             amount: '4000000000000000000000000000', // 400 NEAR
+            pool_id: config.poolId,
           },
           gas: GAS_FOR_CALL,
         });
@@ -892,7 +896,9 @@ describe('Staking Pool', async function () {
     await assert.rejects(
       async () => {
         await global.usnContract.withdraw_all({
-          args: {},
+          args: {
+            pool_id: config.poolId,
+          },
           gas: GAS_FOR_CALL,
         });
       },
@@ -912,6 +918,7 @@ describe('Staking Pool', async function () {
     await global.usnContract.unstake({
       args: {
         amount: unstakeAmount,
+        pool_id: config.poolId,
       },
       gas: GAS_FOR_CALL,
     });
@@ -932,6 +939,7 @@ describe('Staking Pool', async function () {
     await global.usnContract.unstake({
       args: {
         amount: '4000000000000000000000000000', // 400 NEAR
+        pool_id: config.poolId,
       },
       gas: GAS_FOR_CALL,
     });
@@ -952,6 +960,7 @@ describe('Staking Pool', async function () {
     await global.usnContract.stake({
       args: {
         amount: stakeAmount,
+        pool_id: config.poolId,
       },
       gas: GAS_FOR_CALL,
     });
@@ -962,7 +971,9 @@ describe('Staking Pool', async function () {
     assert(new BN(usnStakeInfoBefore.staked_balance, 10).eq(new BN(stakeAmount, 10)));
 
     await global.usnContract.unstake_all({
-      args: {},
+      args: {
+        pool_id: config.poolId,
+      },
       gas: GAS_FOR_CALL,
     });
 
@@ -980,7 +991,9 @@ describe('Staking Pool', async function () {
     await assert.rejects(
       async () => {
         await global.usnContract.withdraw_all({
-          args: {},
+          args: {
+            pool_id: config.poolId,
+          },
           gas: GAS_FOR_CALL,
         });
       },

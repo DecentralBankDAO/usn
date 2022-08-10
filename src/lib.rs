@@ -606,24 +606,24 @@ impl Contract {
         ))
     }
 
-    pub fn stake(&self, amount: U128) -> Promise {
+    pub fn stake(&self, amount: U128, pool_id: AccountId) -> Promise {
         self.assert_owner();
-        staking::stake(amount)
+        staking::stake(amount, pool_id)
     }
 
-    pub fn unstake(&self, amount: U128) -> Promise {
+    pub fn unstake(&self, amount: U128, pool_id: AccountId) -> Promise {
         self.assert_owner();
-        staking::unstake(amount)
+        staking::unstake(amount, pool_id)
     }
 
-    pub fn unstake_all(&self) -> Promise {
+    pub fn unstake_all(&self, pool_id: AccountId) -> Promise {
         self.assert_owner();
-        staking::unstake_all()
+        staking::unstake_all(pool_id)
     }
 
-    pub fn withdraw_all(&self) -> Promise {
+    pub fn withdraw_all(&self, pool_id: AccountId) -> Promise {
         self.assert_owner();
-        staking::withdraw_all()
+        staking::withdraw_all(pool_id)
     }
 
     pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8) {

@@ -540,7 +540,7 @@ describe('Commission transfer', function () {
         });
       },
       (err) => {
-        assert.match(err.message, /Failed to decrease asset usdt.test.near commission/);
+        assert.match(err.message, /Exceeded the commission v2 amount/);
         return true;
       }
     );
@@ -581,7 +581,7 @@ describe('Commission transfer', function () {
         });
       },
       (err) => {
-        assert.match(err.message, /Failed to decrease asset usdt.test.near commission/);
+        assert.match(err.message, /Exceeded the commission v2 amount/);
         return true;
       }
     );

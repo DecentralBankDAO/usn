@@ -103,10 +103,11 @@ pub struct CommissionV2Output {
 
 impl From<&StableTreasury> for CommissionV2Output {
     fn from(treasury: &StableTreasury) -> Self {
-        let mut commission: u128 = 0;
-        for asset in treasury.supported_assets().iter() {
-            commission += asset.1.commission().0
-        }
+        let commission: u128 = treasury
+            .supported_assets()
+            .iter()
+            .map(|asset| asset.1.commission().0)
+            .sum();
         Self {
             usn: commission.into(),
         }
@@ -655,7 +656,6 @@ impl Contract {
 
     pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128) {
         self.assert_owner();
-        let asset_id = usdt_id();
         let amount = amount.0;
         assert!(amount > 0, "Amount should be positive");
 
@@ -668,12 +668,26 @@ impl Contract {
             (self.commission.usn, self.commission.near)
         };
 
-        let usn_commission_v2 = amount - usn_commission_v1;
+        let mut usn_commission_v2 = amount - usn_commission_v1;
+        assert!(
+            usn_commission_v2 <= self.commission().v2.usn.0,
+            "Exceeded the commission v2 amount"
+        );
 
-        self.stable_treasury
-            .decrease_commission(&asset_id, usn_commission_v2);
         self.commission.usn -= usn_commission_v1;
         self.commission.near -= near_commission_v1;
+
+        for asset in self.treasury().iter() {
+            if usn_commission_v2 > asset.1.commission().0 {
+                self.stable_treasury
+                    .decrease_commission(&asset.0, asset.1.commission().0);
+                usn_commission_v2 -= asset.1.commission().0;
+            } else {
+                self.stable_treasury
+                    .decrease_commission(&asset.0, usn_commission_v2);
+                break;
+            }
+        }
 
         self.token.internal_deposit(&account_id, amount);
         event::emit::ft_mint(&account_id, amount, None);
@@ -1177,7 +1191,127 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Failed to decrease asset usdt.test.near commission")]
+    fn test_transfer_v2_commission_several_assets() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+
+        contract
+            .stable_treasury
+            .deposit(&mut contract.token, &accounts(2), &usdt_id(), 100000);
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+
+        contract.add_stable_asset(&accounts(4), 20);
+        contract.stable_treasury.deposit(
+            &mut contract.token,
+            &accounts(2),
+            &accounts(4),
+            1000000000000000000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(1010000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(treasury[0].1.commission().0, 10000000000000);
+        assert_eq!(treasury[1].1.commission().0, 1000000000000000);
+
+        contract.transfer_commission(accounts(3), U128(500000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(contract.commission().v1.usn, U128(0));
+        assert_eq!(contract.commission().v1.near, U128(0));
+        assert_eq!(treasury[0].1.commission().0, 0);
+        assert_eq!(treasury[1].1.commission().0, 510000000000000);
+        assert_eq!(contract.commission().v2.usn, U128(510000000000000));
+        assert_eq!(
+            contract.ft_balance_of(accounts(3)),
+            U128::from(500000000000000)
+        );
+    }
+
+    #[test]
+    fn test_transfer_part_v2_commission_several_assets() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+
+        contract
+            .stable_treasury
+            .deposit(&mut contract.token, &accounts(2), &usdt_id(), 100000);
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+
+        contract.add_stable_asset(&accounts(4), 20);
+        contract.stable_treasury.deposit(
+            &mut contract.token,
+            &accounts(2),
+            &accounts(4),
+            1000000000000000000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(1010000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(treasury[0].1.commission().0, 10000000000000);
+        assert_eq!(treasury[1].1.commission().0, 1000000000000000);
+
+        contract.transfer_commission(accounts(3), U128(10000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(contract.commission().v1.usn, U128(0));
+        assert_eq!(contract.commission().v1.near, U128(0));
+        assert_eq!(treasury[0].1.commission().0, 0);
+        assert_eq!(treasury[1].1.commission().0, 1000000000000000);
+        assert_eq!(contract.commission().v2.usn, U128(1000000000000000));
+        assert_eq!(
+            contract.ft_balance_of(accounts(3)),
+            U128::from(10000000000000)
+        );
+    }
+
+    #[test]
+    fn test_transfer_full_v2_commission_several_assets() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+
+        contract
+            .stable_treasury
+            .deposit(&mut contract.token, &accounts(2), &usdt_id(), 100000);
+
+        assert_eq!(contract.commission().v2.usn, U128(10000000000000));
+
+        contract.add_stable_asset(&accounts(4), 20);
+        contract.stable_treasury.deposit(
+            &mut contract.token,
+            &accounts(2),
+            &accounts(4),
+            1000000000000000000000,
+        );
+
+        assert_eq!(contract.commission().v2.usn, U128(1010000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(treasury[0].1.commission().0, 10000000000000);
+        assert_eq!(treasury[1].1.commission().0, 1000000000000000);
+
+        contract.transfer_commission(accounts(3), U128(1010000000000000));
+
+        let treasury = contract.treasury();
+        assert_eq!(contract.commission().v1.usn, U128(0));
+        assert_eq!(contract.commission().v1.near, U128(0));
+        assert_eq!(treasury[0].1.commission().0, 0);
+        assert_eq!(treasury[1].1.commission().0, 0);
+        assert_eq!(contract.commission().v2.usn, U128(0));
+        assert_eq!(
+            contract.ft_balance_of(accounts(3)),
+            U128::from(1010000000000000)
+        );
+    }
+
+    #[test]
+    #[should_panic]
     fn test_transfer_more_v2_commission() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
@@ -1193,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Failed to decrease asset usdt.test.near commission")]
+    #[should_panic]
     fn test_transfer_more_v1_commission_with_not_enough_v2_commission() {
         let context = get_context(accounts(1));
         testing_env!(context.build());

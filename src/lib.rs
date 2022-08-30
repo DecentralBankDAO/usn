@@ -1,6 +1,7 @@
 #![deny(warnings)]
 mod event;
 mod ft;
+mod oracle;
 mod owner;
 mod stable;
 mod staking;
@@ -21,6 +22,7 @@ use near_sdk::{
     assert_one_yocto, env, ext_contract, is_promise_success, near_bindgen, sys, AccountId, Balance,
     BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseOrValue, ONE_YOCTO,
 };
+use oracle::{ExchangeRate, Oracle, PriceData};
 
 use std::fmt::Debug;
 
@@ -35,6 +37,10 @@ const NO_DEPOSIT: Balance = 0;
 const USN_DECIMALS: u8 = 18;
 const GAS_FOR_REFUND_PROMISE: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_FT_TRANSFER: Gas = Gas(25_000_000_000_000);
+const GAS_FOR_BUY_PROMISE: Gas = Gas(10_000_000_000_000);
+const MIN_COLLATERAL_RATIO: u32 = 100;
+const MAX_COLLATERAL_RATIO: u32 = 1000;
+const PERCENT_MULTIPLIER: u128 = 100;
 
 #[derive(BorshStorageKey, BorshSerialize)]
 enum StorageKey {
@@ -60,6 +66,14 @@ pub enum BlackListStatus {
 pub enum ContractStatus {
     Working,
     Paused,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ExpectedRate {
+    pub multiplier: U128,
+    pub slippage: U128,
+    pub decimals: u8,
 }
 
 impl std::fmt::Display for ContractStatus {
@@ -139,6 +153,7 @@ pub struct Contract {
     status: ContractStatus,
     commission: CommissionV1,
     stable_treasury: StableTreasury,
+    oracle: Oracle,
 }
 
 const DATA_IMAGE_SVG_NEAR_ICON: &str =
@@ -157,15 +172,58 @@ pub trait FtApi {
 #[ext_contract(ext_self)]
 trait ContractCallback {
     #[private]
+    fn mint_with_price_callback(
+        &mut self,
+        near: U128,
+        collateral_ratio: u32,
+        #[callback] price: PriceData,
+    ) -> U128;
+
+    #[private]
+    fn handle_refund(&mut self, attached_deposit: U128);
+
+    #[private]
     fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
 trait ContractCallback {
+    fn mint_with_price_callback(
+        &mut self,
+        near: U128,
+        collateral_ratio: u32,
+        price: PriceData,
+    ) -> U128;
+
+    fn handle_refund(&mut self, attached_deposit: U128);
+
     fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
 #[near_bindgen]
 impl ContractCallback for Contract {
+    #[private]
+    fn mint_with_price_callback(
+        &mut self,
+        near: U128,
+        collateral_ratio: u32,
+        #[callback] price: PriceData,
+    ) -> U128 {
+        let rate: ExchangeRate = price.into();
+        assert!(near.0 > 0, "Amount should be positive");
+
+        self.finish_mint_by_near(near.0, rate, collateral_ratio)
+            .into()
+    }
+
+    #[private]
+    fn handle_refund(&mut self, attached_deposit: U128) {
+        if !is_promise_success() {
+            Promise::new(self.owner_id.clone())
+                .transfer(attached_deposit.0)
+                .as_return();
+        }
+    }
+
     #[private]
     fn handle_withdraw_refund(&mut self, account_id: AccountId, token_id: AccountId, amount: U128) {
         if !is_promise_success() {
@@ -204,6 +262,7 @@ impl Contract {
             status: ContractStatus::Working,
             commission: CommissionV1::default(),
             stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
+            oracle: Oracle::default(),
         };
 
         this
@@ -322,11 +381,6 @@ impl Contract {
             pub smooth: ExchangeRate,
         }
 
-        #[derive(BorshSerialize, BorshDeserialize)]
-        struct Oracle {
-            pub last_report: Option<ExchangeRates>,
-        }
-
         #[derive(BorshDeserialize, BorshSerialize)]
         struct ExponentialSpreadParams {
             pub min: f64,
@@ -429,6 +483,7 @@ impl Contract {
                 &mut prev.stable_treasury,
                 StorageKey::StableTreasury,
             ),
+            oracle: prev.oracle,
         }
     }
 
@@ -572,6 +627,67 @@ impl FungibleTokenReceiver for Contract {
 
 #[near_bindgen]
 impl Contract {
+    // Owner only
+    #[payable]
+    pub fn mint_by_near(&mut self, collateral_ratio: u32) {
+        self.assert_owner();
+        self.abort_if_pause();
+        assert!(
+            collateral_ratio >= MIN_COLLATERAL_RATIO && collateral_ratio <= MAX_COLLATERAL_RATIO,
+            "Collateral ratio is out of bounds"
+        );
+
+        let near = env::attached_deposit();
+
+        Oracle::get_exchange_rate_promise()
+            .then(ext_self::mint_with_price_callback(
+                near.into(),
+                collateral_ratio,
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_BUY_PROMISE,
+            ))
+            // Returning callback promise, so the transaction will return the value or a failure.
+            // But the refund will still happen.
+            .as_return()
+            .then(ext_self::handle_refund(
+                near.into(),
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_REFUND_PROMISE,
+            ));
+    }
+
+    fn finish_mint_by_near(
+        &mut self,
+        near: Balance,
+        rate: ExchangeRate,
+        collateral_ratio: u32,
+    ) -> Balance {
+        let near = U256::from(near);
+        let multiplier = U256::from(rate.multiplier());
+        let collateral_ratio = U256::from(collateral_ratio);
+
+        // Make exchange: NEAR -> USN
+        let amount = near * multiplier / 10u128.pow(u32::from(rate.decimals() - USN_DECIMALS));
+
+        // Apply collateral rate
+        let amount = amount * U256::from(PERCENT_MULTIPLIER) / collateral_ratio;
+
+        // Expected result (128-bit) can have 20 digits before and 18 after the decimal point.
+        // We don't expect more than 10^20 tokens on a single account. It panics if overflows.
+        let amount = amount.as_u128();
+
+        if amount == 0 {
+            env::panic_str("Not enough NEAR: attached deposit exchanges to 0 tokens");
+        }
+
+        self.token.internal_deposit(&self.owner_id, amount);
+        event::emit::ft_mint(&self.owner_id, amount, None);
+
+        amount
+    }
+
     #[payable]
     pub fn withdraw(&mut self, asset_id: Option<AccountId>, amount: U128) -> Promise {
         let account_id = env::predecessor_account_id();
@@ -695,7 +811,7 @@ impl Contract {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use near_sdk::test_utils::{accounts, VMContextBuilder};
-    use near_sdk::{testing_env, Balance, ONE_YOCTO};
+    use near_sdk::{testing_env, Balance, ONE_NEAR, ONE_YOCTO};
 
     use super::*;
 
@@ -920,6 +1036,60 @@ mod tests {
             .build());
 
         contract.withdraw(None, U128(999900000000000000000));
+    }
+
+    #[test]
+    #[should_panic(expected = "This method can be called only by owner")]
+    fn test_buy_not_owner() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .attached_deposit(ONE_NEAR)
+            .build());
+        contract.mint_by_near(100);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_buy_low_collateral_rate() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        testing_env!(context.attached_deposit(ONE_NEAR).build());
+        contract.mint_by_near(MIN_COLLATERAL_RATIO - 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_buy_exceeded_collateral_rate() {
+        let mut context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        testing_env!(context.attached_deposit(ONE_NEAR).build());
+        contract.mint_by_near(MAX_COLLATERAL_RATIO + 1);
+    }
+
+    #[test]
+    fn test_owner_buy() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = Contract::new(accounts(1));
+
+        let fresh_rate = ExchangeRate::test_fresh_rate();
+
+        assert_eq!(
+            contract.finish_mint_by_near(1_000_000_000_000 * ONE_NEAR, fresh_rate.clone(), 100),
+            11143900000000_000000000000000000
+        );
     }
 
     #[test]

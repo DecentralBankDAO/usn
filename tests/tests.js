@@ -7,6 +7,7 @@ const BN = require('bn.js');
 const ONE_YOCTO = '1';
 const GAS_FOR_CALL = '200000000000000'; // 200 TGas
 const ONE_NEAR = '1000000000000000000000000';
+const TEN_NEARS = '10000000000000000000000000';
 
 describe('Smoke Test', function () {
   it('should get a version', async () => {
@@ -253,6 +254,204 @@ describe('Guardian', function () {
     await global.usnContract.remove_guardians({
       args: { guardians: [config.aliceId] },
     });
+  });
+});
+
+describe('Owner', function () {
+  this.timeout(15000);
+
+  before(async () => {
+    await global.usnContract.propose_new_owner({
+      args: { proposed_owner_id: config.aliceId },
+    });
+    assert.equal(await global.usnContract.owner(), config.usnId);
+
+    await global.aliceContract.accept_ownership({
+      args: {},
+    });
+    assert.equal(await global.usnContract.owner(), config.aliceId);
+  });
+
+
+  it('should fail to buy USN being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.usnContract.mint_by_near({
+          args: {
+            collateral_ratio: 100,
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail to buy USN being due to low collateral ratio', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.mint_by_near({
+          args: {
+            collateral_ratio: 99,
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Collateral ratio is out of bounds/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail to buy USN being due to exceeded collateral ratio', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.mint_by_near({
+          args: {
+            collateral_ratio: 1001,
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Collateral ratio is out of bounds/);
+        return true;
+      }
+    );
+  });
+
+  it('should be able to mint USN for NEAR with 100% collateralization', async () => {
+    const nearOwnerBalanceBefore = await global.aliceAccount.state();
+    const nearUsnBalanceBefore = await global.usnAccount.state();
+    const usnBalanceBefore = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    await global.aliceContract.mint_by_near({
+      args: {
+        collateral_ratio: 100,
+      },
+      amount: TEN_NEARS,
+      gas: GAS_FOR_CALL,
+    });
+
+    const nearOwnerBalanceAfter = await global.aliceAccount.state();
+    const nearUsnBalanceAfter = await global.usnAccount.state();
+    const usnBalanceAfter = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert(new BN(nearUsnBalanceAfter.amount)
+      .sub(new BN(nearUsnBalanceBefore.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert(new BN(nearOwnerBalanceBefore.amount)
+      .sub(new BN(nearOwnerBalanceAfter.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert.equal(new BN(usnBalanceAfter)
+      .sub(new BN(usnBalanceBefore)).toString(),
+      '111439000000000000000' // 111.43$
+    );
+  });
+
+  it('should be able to mint USN for NEAR with 210% collateralization', async () => {
+    const nearOwnerBalanceBefore = await global.aliceAccount.state();
+    const nearUsnBalanceBefore = await global.usnAccount.state();
+    const usnBalanceBefore = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    await global.aliceContract.mint_by_near({
+      args: {
+        collateral_ratio: 210,
+      },
+      amount: TEN_NEARS,
+      gas: GAS_FOR_CALL,
+    });
+
+    const nearOwnerBalanceAfter = await global.aliceAccount.state();
+    const nearUsnBalanceAfter = await global.usnAccount.state();
+    const usnBalanceAfter = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert(new BN(nearUsnBalanceAfter.amount)
+      .sub(new BN(nearUsnBalanceBefore.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert(new BN(nearOwnerBalanceBefore.amount)
+      .sub(new BN(nearOwnerBalanceAfter.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert.equal(new BN(usnBalanceAfter)
+      .sub(new BN(usnBalanceBefore)).toString(),
+      '53066190476190476190' // 53.06$
+    );
+  });
+
+  it('should be able to mint USN for NEAR with 1000% collateralization', async () => {
+    const nearOwnerBalanceBefore = await global.aliceAccount.state();
+    const nearUsnBalanceBefore = await global.usnAccount.state();
+    const usnBalanceBefore = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    await global.aliceContract.mint_by_near({
+      args: {
+        collateral_ratio: 1000,
+      },
+      amount: TEN_NEARS,
+      gas: GAS_FOR_CALL,
+    });
+
+    const nearOwnerBalanceAfter = await global.aliceAccount.state();
+    const nearUsnBalanceAfter = await global.usnAccount.state();
+    const usnBalanceAfter = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    assert(new BN(nearUsnBalanceAfter.amount)
+      .sub(new BN(nearUsnBalanceBefore.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert(new BN(nearOwnerBalanceBefore.amount)
+      .sub(new BN(nearOwnerBalanceAfter.amount))
+      .gt(new BN(TEN_NEARS))
+    );
+    assert.equal(new BN(usnBalanceAfter)
+      .sub(new BN(usnBalanceBefore)).toString(),
+      '11143900000000000000' // 11.14$
+    );
+  });
+
+  after(async () => {
+    const aliceBalance = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+
+    // Flush balances and force registration removal.
+
+    if (aliceBalance != '0') {
+      await global.aliceContract.ft_transfer({
+        args: {
+          receiver_id: 'any',
+          amount: aliceBalance,
+        },
+        amount: ONE_YOCTO,
+      });
+    }
+
+    await global.aliceContract.propose_new_owner({
+      args: { proposed_owner_id: config.usnId },
+    });
+    assert.equal(await global.usnContract.owner(), config.aliceId);
+
+    await global.usnContract.accept_ownership({
+      args: {},
+    });
+    assert.equal(await global.usnContract.owner(), config.usnId);
   });
 });
 

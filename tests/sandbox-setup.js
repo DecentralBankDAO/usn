@@ -18,6 +18,8 @@ const config = {
   usdcPath: './tests/test_token.wasm',
   refPath: './tests/ref_exchange.wasm',
   poolPath: './tests/staking_pool.wasm',
+  priceoraclePath: './tests/price_oracle.wasm',
+  priceoracleMultiplier: '111439',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
   masterId: 'test.near',
   usnId: 'usn.test.near',
@@ -25,6 +27,7 @@ const config = {
   usdcId: 'usdc.test.near',
   refId: 'ref.test.near',
   poolId: 'pool.test.near',
+  oracleId: 'priceoracle.test.near',
   aliceId: 'alice.test.near',
   carolId: 'carol.test.near',
 };
@@ -69,6 +72,7 @@ const usnMethods = {
     'withdraw_all',
     'transfer_commission',
     'add_stable_asset',
+    'mint_by_near',
   ],
 };
 
@@ -96,6 +100,16 @@ const poolMethods = {
   viewMethods: ['get_account'],
   changeMethods: [
     'new'
+  ],
+};
+
+const oracleMethods = {
+  changeMethods: [
+    'new',
+    'add_asset',
+    'add_asset_ema',
+    'add_oracle',
+    'report_prices',
   ],
 };
 
@@ -137,6 +151,7 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.usdcId, pubKey, config.amount);
   await masterAccount.createAccount(config.refId, pubKey, config.amount);
   await masterAccount.createAccount(config.poolId, pubKey, config.amount);
+  await masterAccount.createAccount(config.oracleId, pubKey, config.amount);
   await masterAccount.createAccount(config.aliceId, pubKey, config.amount);
   await masterAccount.createAccount(config.carolId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
@@ -144,6 +159,7 @@ async function sandboxSetup() {
   keyStore.setKey(config.networkId, config.usdcId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
   keyStore.setKey(config.networkId, config.poolId, privKey);
+  keyStore.setKey(config.networkId, config.oracleId, privKey);
   keyStore.setKey(config.networkId, config.aliceId, privKey);
   keyStore.setKey(config.networkId, config.carolId, privKey);
 
@@ -271,6 +287,47 @@ async function sandboxSetup() {
       tokens: [config.usdtId, config.usnId],
     },
     amount: '1',
+  });
+
+  // Deploy the priceoracle contract.
+  const wasmPriceoracle = await fs.readFile(config.priceoraclePath);
+  const oracleAccount = new nearAPI.Account(near.connection, config.oracleId);
+  await oracleAccount.deployContract(wasmPriceoracle);
+
+  // Initialize the Oracle contract.
+  const oracleContract = new nearAPI.Contract(
+    oracleAccount,
+    config.oracleId,
+    oracleMethods
+  );
+  await oracleContract.new({
+    args: {
+      recency_duration_sec: 360,
+      owner_id: config.oracleId,
+      near_claim_amount: '0',
+    },
+  });
+  await oracleContract.add_oracle({
+    args: { account_id: config.oracleId },
+    amount: '1',
+  });
+  await oracleContract.add_asset({
+    args: { asset_id: 'wrap.test.near' },
+    amount: '1',
+  });
+  await oracleContract.add_asset_ema({
+    args: { asset_id: 'wrap.test.near', period_sec: 3600 },
+    amount: '1',
+  });
+  await oracleContract.report_prices({
+    args: {
+      prices: [
+        {
+          asset_id: 'wrap.test.near',
+          price: { multiplier: config.priceoracleMultiplier, decimals: 28 },
+        },
+      ],
+    },
   });
 
   // Initialize other accounts connected to the contract for all test cases.

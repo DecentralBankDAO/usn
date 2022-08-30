@@ -414,7 +414,7 @@ impl Contract {
             stable_treasury: OldStableTreasury,
         }
 
-        let prev: PrevContract = env::state_read().expect("Contract is not initialized");
+        let mut prev: PrevContract = env::state_read().expect("Contract is not initialized");
 
         Self {
             owner_id: prev.owner_id,
@@ -425,7 +425,10 @@ impl Contract {
             black_list: prev.black_list,
             status: prev.status,
             commission: prev.commission,
-            stable_treasury: prev.stable_treasury.into(),
+            stable_treasury: StableTreasury::from_old(
+                &mut prev.stable_treasury,
+                StorageKey::StableTreasury,
+            ),
         }
     }
 

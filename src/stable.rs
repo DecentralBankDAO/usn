@@ -21,7 +21,7 @@ pub fn usdt_id() -> AccountId {
     .unwrap()
 }
 
-#[derive(BorshDeserialize, BorshSerialize, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(BorshDeserialize, BorshSerialize, PartialEq, Debug, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum AssetStatus {
     Enabled,
@@ -87,10 +87,10 @@ impl AssetInfo {
     }
 }
 
-pub fn copy_asset_info(old_asset_info: OldAssetInfo) -> AssetInfo {
+fn copy_asset_info(old_asset_info: &OldAssetInfo) -> AssetInfo {
     AssetInfo {
         decimals: old_asset_info.decimals,
-        status: old_asset_info.status,
+        status: old_asset_info.status.clone(),
         commission: old_asset_info.commission,
         commission_rate: CommissionRate::default(),
     }
@@ -99,16 +99,6 @@ pub fn copy_asset_info(old_asset_info: OldAssetInfo) -> AssetInfo {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct OldStableTreasury {
     stable_token: UnorderedMap<AccountId, OldAssetInfo>,
-}
-
-impl From<OldStableTreasury> for StableTreasury {
-    fn from(old_treasury: OldStableTreasury) -> Self {
-        let mut new_assets = UnorderedMap::new(StorageKey::StableTreasury);
-        for asset in old_treasury.stable_token.iter() {
-            new_assets.insert(&asset.0, &copy_asset_info(asset.1));
-        }
-        Self { assets: new_assets }
-    }
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -306,6 +296,19 @@ impl StableTreasury {
         self.assert_asset(asset_id);
         let asset_info = self.assets.get(asset_id).unwrap();
         asset_info.commission_rate
+    }
+
+    pub fn from_old<S>(old_treasury: &mut OldStableTreasury, prefix: S) -> Self
+    where
+        S: IntoStorageKey,
+    {
+        let old_assets = old_treasury.stable_token.to_vec();
+        old_treasury.stable_token.clear();
+        let mut new_assets = UnorderedMap::new(prefix);
+        for (asset_id, old_asset_info) in old_assets.iter() {
+            new_assets.insert(&asset_id.clone(), &copy_asset_info(old_asset_info));
+        }
+        StableTreasury { assets: new_assets }
     }
 }
 

@@ -81,9 +81,7 @@ cargo test
 ## Run integration tests
 
 ```bash
-npm run build
-npm run deploy
-npm run test
+npm test
 ```
 
 ## Manual testing on the Testnet
@@ -116,17 +114,17 @@ Deposit and withdraw
 
 ```bash
 # Send USDT, mint USN.
-near call usdt.fakes.testnet ft_transfer_call --args '{"receiver_id": "usdn.testnet", "amount": "1000000", "msg": ""}' --accountId alice.testnet --amount 0.000000000000000000000001 --gas 100000000000000
+near call usdt.fakes.testnet ft_transfer_call --args '{"receiver_id": "usdn.testnet", "amount": "1000000", "msg": ""}' --accountId alice.testnet --depositYocto 1 --gas 100000000000000
 
 # Burn USN, withdraw USDT.
-near call usdn.testnet withdraw --args '{"amount": "999500000000000000"}' --accountId alice.testnet --amount 0.000000000000000000000001 --gas 100000000000000
+near call usdn.testnet withdraw --args '{"amount": "999500000000000000"}' --accountId alice.testnet --depositYocto 1 --gas 100000000000000
 ```
 
 # DAO
 
 ## Upgrade the contract via Upgrade Proposal
 
-1. Download `usn.mainnet.wasm` from https://github.com/binary-star-near/usn/releases
+1. Download `usn.mainnet.wasm` from https://github.com/DecentralBankDAO/usn/releases
 2. Create an upgrade proposal:
    ```bash
    sputnikdao proposal upgrade usn.mainnet.wasm usn --daoAcc decentralbank --accountId alice.near --network mainnet
@@ -155,6 +153,7 @@ pub fn blacklist_status(&self, account_id: &AccountId) -> BlackListStatus;
 pub fn owner(&self);
 pub fn treasury(&self) -> Vec<(AccountId, StableInfo)>;
 pub fn commission(&self) -> CommissionOutput;
+pub fn commission_rate(&self, asset_id: &AccountId) -> CommissionRate;
 ```
 
 ## NEP-141 (ERC-20)
@@ -201,13 +200,24 @@ pub fn remove_from_blacklist(&mut self, account_id: &AccountId);
 pub fn destroy_black_funds(&mut self, account_id: &AccountId);
 pub fn pause(&mut self);
 pub fn resume(&mut self);
-pub fn set_owner(&mut self, owner_id: AccountId);
 pub fn extend_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8);
 pub fn enable_stable_asset(&mut self, asset_id: &AccountId);
 pub fn disable_stable_asset(&mut self, asset_id: &AccountId);
 pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128); 
+pub fn set_commission_rate(&mut self, asset_id: &AccountId, rate: CommissionRate)
+pub fn stake(&self, amount: U128, pool_id: AccountId) -> Promise;
+pub fn unstake(&self, amount: U128, pool_id: AccountId) -> Promise;
+pub fn unstake_all(&self, pool_id: AccountId) -> Promise;
+pub fn withdraw_all(&self, pool_id: AccountId) -> Promise;
+```
+
+## Ownership change
+
+```rust
+pub fn propose_new_owner(&mut self, proposed_owner_id: AccountId);
+pub fn accept_ownership(&mut self);
 ```
 
 ## Upgradability

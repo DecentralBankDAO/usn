@@ -14,7 +14,7 @@ use near_contract_standards::fungible_token::metadata::{
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use near_contract_standards::fungible_token::resolver::FungibleTokenResolver;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LazyOption, LookupMap, UnorderedMap, UnorderedSet};
+use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
@@ -25,7 +25,7 @@ use near_sdk::{
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
-use stable::{usdt_id, AssetInfo, StableTreasury};
+use stable::{usdt_id, AssetInfo, CommissionRate, OldStableTreasury, StableTreasury};
 
 uint::construct_uint!(
     pub struct U256(4);
@@ -396,11 +396,6 @@ impl Contract {
         }
 
         #[derive(BorshDeserialize, BorshSerialize)]
-        pub struct OldStableTreasury {
-            stable_token: UnorderedMap<AccountId, AssetInfo>,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
         struct PrevContract {
             owner_id: AccountId,
             proposed_owner_id: AccountId,
@@ -430,7 +425,7 @@ impl Contract {
             black_list: prev.black_list,
             status: prev.status,
             commission: prev.commission,
-            stable_treasury: prev.stable_treasury.stable_token.into(),
+            stable_treasury: prev.stable_treasury.into(),
         }
     }
 
@@ -645,13 +640,13 @@ impl Contract {
         self.stable_treasury.supported_assets()
     }
 
-    pub fn set_commission_rate(&mut self, rate: u32) {
+    pub fn set_commission_rate(&mut self, asset_id: &AccountId, rate: CommissionRate) {
         self.assert_owner();
-        self.stable_treasury.set_commission_rate(rate);
+        self.stable_treasury.set_commission_rate(asset_id, rate);
     }
 
-    pub fn commission_rate(&self) -> u32 {
-        self.stable_treasury.commission_rate()
+    pub fn commission_rate(&self, asset_id: &AccountId) -> CommissionRate {
+        self.stable_treasury.commission_rate(asset_id)
     }
 
     pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128) {

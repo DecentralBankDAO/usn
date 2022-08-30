@@ -15,12 +15,14 @@ const config = {
   keyPath: '/tmp/near-usn-test-sandbox/validator_key.json',
   usnPath: './target/wasm32-unknown-unknown/sandbox/usn.wasm',
   usdtPath: './tests/test_token.wasm',
+  usdcPath: './tests/test_token.wasm',
   refPath: './tests/ref_exchange.wasm',
   poolPath: './tests/staking_pool.wasm',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
   masterId: 'test.near',
   usnId: 'usn.test.near',
   usdtId: 'usdt.test.near',
+  usdcId: 'usdc.test.near',
   refId: 'ref.test.near',
   poolId: 'pool.test.near',
   aliceId: 'alice.test.near',
@@ -66,10 +68,16 @@ const usnMethods = {
     'unstake_all',
     'withdraw_all',
     'transfer_commission',
+    'add_stable_asset',
   ],
 };
 
 const usdtMethods = {
+  viewMethods: ['ft_balance_of'],
+  changeMethods: ['new', 'mint', 'ft_transfer', 'ft_transfer_call'],
+};
+
+const usdcMethods = {
   viewMethods: ['ft_balance_of'],
   changeMethods: ['new', 'mint', 'ft_transfer', 'ft_transfer_call'],
 };
@@ -126,12 +134,14 @@ async function sandboxSetup() {
   // Create test accounts.
   await masterAccount.createAccount(config.usnId, pubKey, config.amount);
   await masterAccount.createAccount(config.usdtId, pubKey, config.amount);
+  await masterAccount.createAccount(config.usdcId, pubKey, config.amount);
   await masterAccount.createAccount(config.refId, pubKey, config.amount);
   await masterAccount.createAccount(config.poolId, pubKey, config.amount);
   await masterAccount.createAccount(config.aliceId, pubKey, config.amount);
   await masterAccount.createAccount(config.carolId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
   keyStore.setKey(config.networkId, config.usdtId, privKey);
+  keyStore.setKey(config.networkId, config.usdcId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
   keyStore.setKey(config.networkId, config.poolId, privKey);
   keyStore.setKey(config.networkId, config.aliceId, privKey);
@@ -174,6 +184,29 @@ async function sandboxSetup() {
   });
   await usdtContract.mint({
     args: { account_id: config.aliceId, amount: '1000000000000' },
+  });
+
+  // Deploy USDC contract.
+  const wasmUsdc = await fs.readFile(config.usdcPath);
+  const usdcAccount = new nearAPI.Account(near.connection, config.usdcId);
+  await usdcAccount.deployContract(wasmUsdc);
+
+  // Initialize USDC contract.
+  const usdcContract = new nearAPI.Contract(
+    usdcAccount,
+    config.usdcId,
+    usdcMethods
+  );
+  await usdcContract.new({ args: {} });
+  // Register accounts in USDC contract to enable depositing.
+  await usdcContract.mint({
+    args: { account_id: config.usdcId, amount: '10000000000000' },
+  });
+  await usdcContract.mint({
+    args: { account_id: config.usnId, amount: '10000000000000' },
+  });
+  await usdcContract.mint({
+    args: { account_id: config.aliceId, amount: '0' },
   });
 
   // Deploy Staking Pool contract.
@@ -253,6 +286,12 @@ async function sandboxSetup() {
     usdtMethods
   );
 
+  const aliceUsdc = new nearAPI.Contract(
+    aliceAccount,
+    config.usdcId,
+    usdcMethods
+  );
+
   const carolAccount = new nearAPI.Account(near.connection, config.carolId);
   const carolUsdt = new nearAPI.Contract(
     carolAccount,
@@ -269,10 +308,12 @@ async function sandboxSetup() {
   global.usnAccount = usnAccount;
   global.usnContract = usnContract;
   global.usdtContract = usdtContract;
+  global.usdcContract = usdcContract;
   global.refContract = refContract;
   global.poolContract = poolContract;
   global.aliceAccount = aliceAccount;
   global.aliceUsdt = aliceUsdt;
+  global.aliceUsdc = aliceUsdc;
   global.aliceContract = aliceContract;
   global.carolContract = carolContract;
   global.carolUsdt = carolUsdt;

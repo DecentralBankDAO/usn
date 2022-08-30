@@ -67,8 +67,13 @@ describe('Anyone', function () {
   });
 
   it('should get commission rate', async () => {
-    const commission_rate = await global.aliceContract.commission_rate();
-    assert.equal(commission_rate, 100);
+    const commission_rate = await global.aliceContract.commission_rate({
+      asset_id: config.usdtId,
+    });
+    assert.deepEqual(commission_rate, {
+      deposit: 100,
+      withdraw: 100
+    });
   });
 });
 
@@ -136,14 +141,84 @@ describe('Owner', function () {
 describe('Owner', function () {
   this.timeout(5000);
 
-  it('should be able to change commission rate', async () => {
-    await global.usnContract.set_commission_rate({ args: { rate: 2000 } });
-    const commission_rate = await global.aliceContract.commission_rate();
-    assert.equal(commission_rate, 2000);
+  it('should fail to set deposit commission rate being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.set_commission_rate({
+          args: {
+            asset_id: config.usdtId,
+            rate: {
+              deposit: 1000,
+            }
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail to set withdraw commission rate being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.set_commission_rate({
+          args: {
+            asset_id: config.usdtId,
+            rate: {
+              withdraw: 1000,
+            }
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should be able to change deposit commission rate', async () => {
+    await global.usnContract.set_commission_rate({
+      args: {
+        asset_id: config.usdtId,
+        rate: {
+          deposit: 2000,
+        }
+      }
+    });
+    const commission_rate = await global.aliceContract.commission_rate({
+      asset_id: config.usdtId,
+    });
+    assert.equal(commission_rate.deposit, 2000);
+  });
+
+  it('should be able to change withdraw commission rate', async () => {
+    await global.usnContract.set_commission_rate({
+      args: {
+        asset_id: config.usdtId,
+        rate: {
+          withdraw: 3000,
+        }
+      }
+    });
+    const commission_rate = await global.aliceContract.commission_rate({
+      asset_id: config.usdtId,
+    });
+    assert.equal(commission_rate.withdraw, 3000);
   });
 
   after(async () => {
-    await global.usnContract.set_commission_rate({ args: { rate: 100 } });
+    await global.usnContract.set_commission_rate({
+      args: {
+        asset_id: config.usdtId,
+        rate: {
+          deposit: 100,
+          withdraw: 100,
+        }
+      }
+    });
   });
 });
 
@@ -224,7 +299,6 @@ describe('User', async function () {
     );
     assert.equal(commission.v2.usn, '100000000000000000000');
 
-
     // Alice swaps USN to USDT.
     await global.aliceContract.withdraw({
       args: {
@@ -248,6 +322,95 @@ describe('User', async function () {
       '0'
     );
     assert.equal(commission2.v2.usn, '199990000000000000000');
+  });
+
+  it('should deposit USDT and withdraw USDC', async () => {
+    // Fill Alice account with USDT
+    await global.usdtContract.ft_transfer({
+      args: {
+        receiver_id: config.aliceId,
+        amount: '1000000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const usdtBefore = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const commissionBefore = await global.usnContract.commission();
+
+    // Alice gets USN.
+    await global.aliceUsdt.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: '1000000000000',
+        msg: '',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const usdtAfter = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const commissionAfter = await global.usnContract.commission();
+
+    assert.equal(
+      new BN(usdtBefore).sub(new BN(usdtAfter)).toString(),
+      '1000000000000'
+    );
+    assert.equal(
+      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
+      '999900000000000000000000'
+    );
+    assert.equal(new BN(commissionAfter.v2.usn)
+      .sub(new BN(commissionBefore.v2.usn)).toString(),
+      '100000000000000000000');
+
+    await global.usnContract.add_stable_asset({
+      args: {
+        asset_id: config.usdcId,
+        decimals: 6,
+      }
+    });
+    await global.usnContract.set_commission_rate({
+      args: {
+        asset_id: config.usdcId,
+        rate: {
+          withdraw: 2000,
+        }
+      }
+    });
+
+    // Alice swaps USN to USDC.
+    await global.aliceContract.withdraw({
+      args: {
+        asset_id: config.usdcId,
+        amount: '999900000000000000000000',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const usdcBalance = await global.aliceUsdc.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usdtAfter2 = await global.aliceUsdt.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const commissionAfter2 = await global.usnContract.commission();
+
+    assert.equal(usdcBalance, '997900200000');
+    assert.equal(usdtAfter2, usdtAfter);
+    assert.equal(
+      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
+      '0'
+    );
+    assert.equal(new BN(commissionAfter2.v2.usn)
+      .sub(new BN(commissionAfter.v2.usn)).toString(),
+      '1999800000000000000000');
   });
 
   it('should have withdrawn all USN to get unregistered', async () => {

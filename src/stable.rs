@@ -28,13 +28,43 @@ pub enum AssetStatus {
     Disabled,
 }
 
+#[derive(Debug)]
+pub enum AssetAction {
+    Deposit,
+    Withdraw,
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct CommissionRate {
+    deposit: Option<u32>,
+    withdraw: Option<u32>,
+}
+
+impl Default for CommissionRate {
+    fn default() -> Self {
+        Self {
+            deposit: Some(INITIAL_COMMISSION_RATE),
+            withdraw: Some(INITIAL_COMMISSION_RATE),
+        }
+    }
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct OldAssetInfo {
+    decimals: u8,
+    commission: U128,
+    status: AssetStatus,
+}
+
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetInfo {
     decimals: u8,
+    status: AssetStatus,
     // Stored in USN due to more precise value
     commission: U128,
-    status: AssetStatus,
+    commission_rate: CommissionRate,
 }
 
 impl AssetInfo {
@@ -46,8 +76,9 @@ impl AssetInfo {
 
         AssetInfo {
             decimals,
-            commission: U128(0),
             status: AssetStatus::Enabled,
+            commission: U128(0),
+            commission_rate: CommissionRate::default(),
         }
     }
 
@@ -56,19 +87,33 @@ impl AssetInfo {
     }
 }
 
-impl From<UnorderedMap<AccountId, AssetInfo>> for StableTreasury {
-    fn from(assets: UnorderedMap<AccountId, AssetInfo>) -> Self {
-        Self {
-            assets,
-            commission_rate: INITIAL_COMMISSION_RATE,
+pub fn copy_asset_info(old_asset_info: OldAssetInfo) -> AssetInfo {
+    AssetInfo {
+        decimals: old_asset_info.decimals,
+        status: old_asset_info.status,
+        commission: old_asset_info.commission,
+        commission_rate: CommissionRate::default(),
+    }
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct OldStableTreasury {
+    stable_token: UnorderedMap<AccountId, OldAssetInfo>,
+}
+
+impl From<OldStableTreasury> for StableTreasury {
+    fn from(old_treasury: OldStableTreasury) -> Self {
+        let mut new_assets = UnorderedMap::new(StorageKey::StableTreasury);
+        for asset in old_treasury.stable_token.iter() {
+            new_assets.insert(&asset.0, &copy_asset_info(asset.1));
         }
+        Self { assets: new_assets }
     }
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct StableTreasury {
     assets: UnorderedMap<AccountId, AssetInfo>,
-    commission_rate: u32,
 }
 
 impl StableTreasury {
@@ -78,7 +123,6 @@ impl StableTreasury {
     {
         let mut this = Self {
             assets: UnorderedMap::new(prefix),
-            commission_rate: INITIAL_COMMISSION_RATE,
         };
 
         // USDT is supported by default.
@@ -129,7 +173,7 @@ impl StableTreasury {
         self.assert_status(asset_id, AssetStatus::Enabled);
         let asset = self.assets.get(asset_id).unwrap();
         let amount = self.convert_decimals(asset_amount, asset.decimals, USN_DECIMALS);
-        let amount_without_fee = self.withdraw_commission(asset_id, amount);
+        let amount_without_fee = self.withdraw_commission(asset_id, amount, AssetAction::Deposit);
         ft.internal_deposit(account_id, amount_without_fee);
         event::emit::ft_mint(account_id, amount_without_fee, None);
     }
@@ -144,7 +188,7 @@ impl StableTreasury {
         self.assert_asset(asset_id);
         self.assert_status(asset_id, AssetStatus::Enabled);
         let asset = self.assets.get(asset_id).unwrap();
-        let amount_without_fee = self.withdraw_commission(asset_id, amount);
+        let amount_without_fee = self.withdraw_commission(asset_id, amount, AssetAction::Withdraw);
         let asset_amount = self.convert_decimals(amount_without_fee, USN_DECIMALS, asset.decimals);
         assert_ne!(
             asset_amount, 0,
@@ -191,9 +235,18 @@ impl StableTreasury {
         }
     }
 
-    fn withdraw_commission(&mut self, asset_id: &AccountId, amount: u128) -> u128 {
+    fn withdraw_commission(
+        &mut self,
+        asset_id: &AccountId,
+        amount: u128,
+        action: AssetAction,
+    ) -> u128 {
         let mut asset_info = self.assets.get(asset_id).unwrap();
-        let commission = amount * self.commission_rate as u128 / 10u128.pow(SPREAD_DECIMAL as u32);
+        let commission_rate = match action {
+            AssetAction::Deposit => asset_info.commission_rate.deposit.unwrap(),
+            AssetAction::Withdraw => asset_info.commission_rate.withdraw.unwrap(),
+        };
+        let commission = amount * commission_rate as u128 / 10u128.pow(SPREAD_DECIMAL as u32);
         asset_info.commission = (asset_info.commission.0 + commission).into();
         self.assets.insert(asset_id, &asset_info);
 
@@ -201,7 +254,9 @@ impl StableTreasury {
     }
 
     fn refund_commission(&mut self, asset_id: &AccountId, amount: u128) {
-        let commission = amount * self.commission_rate as u128 / 10u128.pow(SPREAD_DECIMAL as u32);
+        let asset_info = self.assets.get(asset_id).unwrap();
+        let commission = amount * asset_info.commission_rate.withdraw.unwrap() as u128
+            / 10u128.pow(SPREAD_DECIMAL as u32);
         self.decrease_commission(asset_id, commission);
     }
 
@@ -215,21 +270,42 @@ impl StableTreasury {
         self.assets.insert(asset_id, &asset_info);
     }
 
-    pub fn set_commission_rate(&mut self, rate: u32) {
+    pub fn set_commission_rate(&mut self, asset_id: &AccountId, rate: CommissionRate) {
+        self.assert_asset(asset_id);
+
+        let mut asset_info = self.assets.get(asset_id).unwrap();
+        if let Some(deposit_rate) = rate.deposit {
+            self.assert_rate(deposit_rate);
+            asset_info.commission_rate.deposit = Some(deposit_rate);
+            self.new_rate_log(AssetAction::Deposit, deposit_rate);
+        }
+        if let Some(withdraw_rate) = rate.withdraw {
+            self.assert_rate(withdraw_rate);
+            asset_info.commission_rate.withdraw = Some(withdraw_rate);
+            self.new_rate_log(AssetAction::Withdraw, withdraw_rate);
+        }
+        self.assets.insert(asset_id, &asset_info);
+    }
+
+    fn assert_rate(&self, rate: u32) {
         assert!(
             rate <= MAX_COMMISSION_RATE,
             "Commission rate cannot be more than 5%"
         );
-        self.commission_rate = rate;
+    }
 
+    fn new_rate_log(&self, action: AssetAction, rate: u32) {
         env::log_str(&format!(
-            "New commission rate was set: {}%",
+            "New {:?} commission rate was set: {}%",
+            action,
             rate as f64 * PERCENT_MULTIPLICATOR as f64 / 10f64.powi(SPREAD_DECIMAL as i32)
         ));
     }
 
-    pub fn commission_rate(&self) -> u32 {
-        self.commission_rate
+    pub fn commission_rate(&self, asset_id: &AccountId) -> CommissionRate {
+        self.assert_asset(asset_id);
+        let asset_info = self.assets.get(asset_id).unwrap();
+        asset_info.commission_rate
     }
 }
 
@@ -398,7 +474,17 @@ mod tests {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
 
-        treasury.set_commission_rate(MAX_COMMISSION_RATE);
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(MAX_COMMISSION_RATE),
+                withdraw: None,
+            },
+        );
+        assert_eq!(
+            treasury.commission_rate(&usdt_id()).deposit,
+            Some(MAX_COMMISSION_RATE)
+        );
         treasury.deposit(&mut token, &accounts(1), &usdt_id(), 10000);
         assert_eq!(
             treasury.supported_assets()[0].1.commission,
@@ -435,24 +521,65 @@ mod tests {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
         let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
 
-        treasury.set_commission_rate(MAX_COMMISSION_RATE);
-
         treasury.add_asset(&accounts(2), 8);
+        treasury.set_commission_rate(
+            &accounts(2),
+            CommissionRate {
+                deposit: None,
+                withdraw: Some(MAX_COMMISSION_RATE),
+            },
+        );
+        assert_eq!(
+            treasury.commission_rate(&accounts(2)).withdraw,
+            Some(MAX_COMMISSION_RATE)
+        );
+
         treasury.deposit(&mut token, &accounts(1), &accounts(2), 100000);
         let usn_amount = token.accounts.get(&accounts(1)).unwrap();
-        assert_eq!(usn_amount, 950000000000000);
+        assert_eq!(usn_amount, 999900000000000);
         assert_eq!(
             treasury.supported_assets()[1].1.commission,
-            U128(50000000000000)
+            U128(100000000000)
         );
 
         let withdrawn = treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
         assert_eq!(
             treasury.supported_assets()[1].1.commission,
-            U128(97500000000000)
+            U128(50095000000000)
         );
         assert!(token.accounts.get(&accounts(1)).is_none());
-        assert_eq!(withdrawn, 90250);
+        assert_eq!(withdrawn, 94990);
+    }
+
+    #[test]
+    fn test_deposit_withdraw_different_assets() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
+
+        treasury.deposit(&mut token, &accounts(1), &usdt_id(), 100000);
+        let usn_amount = token.accounts.get(&accounts(1)).unwrap();
+        assert_eq!(usn_amount, 99990000000000000);
+        assert_eq!(
+            treasury.supported_assets()[0].1.commission,
+            U128(10000000000000)
+        );
+
+        treasury.add_asset(&accounts(2), 8);
+        treasury.set_commission_rate(
+            &accounts(2),
+            CommissionRate {
+                deposit: None,
+                withdraw: Some(5000),
+            },
+        );
+
+        let withdrawn = treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
+        assert_eq!(
+            treasury.supported_assets()[1].1.commission,
+            U128(499950000000000)
+        );
+        assert!(token.accounts.get(&accounts(1)).is_none());
+        assert_eq!(withdrawn, 9949005);
     }
 
     #[test]
@@ -486,6 +613,47 @@ mod tests {
     }
 
     #[test]
+    fn test_refund_different_assets() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        let mut token = FungibleTokenFreeStorage::new(StorageKey::Token);
+
+        treasury.deposit(&mut token, &accounts(1), &usdt_id(), 1000);
+        let usn_amount = token.accounts.get(&accounts(1)).unwrap();
+        assert_eq!(usn_amount, 999900000000000);
+        assert_eq!(
+            treasury.supported_assets()[0].1.commission,
+            U128(100000000000)
+        );
+
+        treasury.add_asset(&accounts(2), 8);
+
+        treasury.set_commission_rate(
+            &accounts(2),
+            CommissionRate {
+                deposit: None,
+                withdraw: Some(5000),
+            },
+        );
+
+        let withdrawn = treasury.withdraw(&mut token, &accounts(1), &accounts(2), usn_amount);
+        assert_eq!(
+            treasury.supported_assets()[1].1.commission,
+            U128(4999500000000)
+        );
+        assert!(token.accounts.get(&accounts(1)).is_none());
+        assert_eq!(withdrawn, 99490);
+
+        treasury.refund(&mut token, &accounts(1), &accounts(2), usn_amount);
+        let usn_amount = token.accounts.get(&accounts(1)).unwrap();
+        assert_eq!(usn_amount, 999900000000000);
+        assert_eq!(
+            treasury.supported_assets()[0].1.commission,
+            U128(100000000000)
+        );
+        assert_eq!(treasury.supported_assets()[1].1.commission, U128(0));
+    }
+
+    #[test]
     #[should_panic(expected = "Not enough USN: specified amount exchanges to 0 tokens")]
     fn test_conversion_loss() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
@@ -515,57 +683,136 @@ mod tests {
     }
 
     #[test]
-    fn test_withdraw_commission() {
+    fn test_withdraw_commission_different_actions() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        let amount_without_fee = treasury.withdraw_commission(&usdt_id(), 100000);
-        assert_eq!(amount_without_fee, 99990);
-        assert_eq!(treasury.supported_assets()[0].1.commission, U128(10));
-        let amount_without_fee = treasury.withdraw_commission(&usdt_id(), amount_without_fee);
-        assert_eq!(amount_without_fee, 99981);
-        assert_eq!(treasury.supported_assets()[0].1.commission, U128(19));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(1000),
+                withdraw: Some(2000),
+            },
+        );
+        let amount_without_fee =
+            treasury.withdraw_commission(&usdt_id(), 100000, AssetAction::Deposit);
+        assert_eq!(amount_without_fee, 99900);
+        assert_eq!(treasury.supported_assets()[0].1.commission, U128(100));
+        let amount_without_fee =
+            treasury.withdraw_commission(&usdt_id(), amount_without_fee, AssetAction::Withdraw);
+        assert_eq!(amount_without_fee, 99701);
+        assert_eq!(treasury.supported_assets()[0].1.commission, U128(299));
     }
 
     #[test]
     fn test_refund_commission() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        treasury.withdraw_commission(&usdt_id(), 10000000000000000000000000000000);
+        treasury.withdraw_commission(&usdt_id(), 100000000000000000000, AssetAction::Withdraw);
         assert_eq!(
             treasury.supported_assets()[0].1.commission.0,
-            1000000000000000000000000000
+            10000000000000000
         );
-        treasury.refund_commission(&usdt_id(), 10000000000000000000000000000000);
+        treasury.refund_commission(&usdt_id(), 100000000000000000000);
         assert_eq!(treasury.supported_assets()[0].1.commission.0, 0);
     }
 
     #[test]
     fn test_set_commission_rate() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        assert_eq!(treasury.commission_rate, 100);
-        treasury.set_commission_rate(1000);
-        assert_eq!(treasury.commission_rate, 1000);
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(1000),
+                withdraw: Some(2000),
+            },
+        );
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(1000));
+        assert_eq!(treasury.commission_rate(&usdt_id()).withdraw, Some(2000));
     }
 
     #[test]
     fn test_set_zero_commission_rate() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        assert_eq!(treasury.commission_rate, 100);
-        treasury.set_commission_rate(0);
-        assert_eq!(treasury.commission_rate, 0);
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(0),
+                withdraw: Some(0),
+            },
+        );
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(0));
+        assert_eq!(treasury.commission_rate(&usdt_id()).withdraw, Some(0));
+    }
+
+    #[test]
+    fn test_set_none_commission_rate() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: None,
+                withdraw: None,
+            },
+        );
+        assert_eq!(
+            treasury.commission_rate(&usdt_id()).deposit,
+            Some(INITIAL_COMMISSION_RATE)
+        );
+        assert_eq!(
+            treasury.commission_rate(&usdt_id()).withdraw,
+            Some(INITIAL_COMMISSION_RATE)
+        );
     }
 
     #[test]
     #[should_panic(expected = "Commission rate cannot be more than 5%")]
-    fn test_set_exceeded_commission_rate() {
+    fn test_set_exceeded_deposit_commission_rate() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        assert_eq!(treasury.commission_rate, 100);
-        treasury.set_commission_rate(MAX_COMMISSION_RATE + 1);
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(MAX_COMMISSION_RATE + 1),
+                withdraw: None,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Commission rate cannot be more than 5%")]
+    fn test_set_exceeded_withdraw_commission_rate() {
+        let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
+        assert_eq!(treasury.commission_rate(&usdt_id()).withdraw, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: None,
+                withdraw: Some(MAX_COMMISSION_RATE + 1),
+            },
+        );
     }
 
     #[test]
     fn test_view_commission_rate() {
         let mut treasury = StableTreasury::new(StorageKey::StableTreasury);
-        assert_eq!(treasury.commission_rate(), 100);
-        treasury.set_commission_rate(1000);
-        assert_eq!(treasury.commission_rate(), 1000);
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit, Some(100));
+        assert_eq!(treasury.commission_rate(&usdt_id()).withdraw, Some(100));
+        treasury.set_commission_rate(
+            &usdt_id(),
+            CommissionRate {
+                deposit: Some(1000),
+                withdraw: Some(5000),
+            },
+        );
+        assert_eq!(treasury.commission_rate(&usdt_id()).deposit.unwrap(), 1000);
+        assert_eq!(treasury.commission_rate(&usdt_id()).withdraw.unwrap(), 5000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Asset bob is not supported")]
+    fn test_view_not_existed_asset_commission_rate() {
+        let treasury = StableTreasury::new(StorageKey::StableTreasury);
+        treasury.commission_rate(&accounts(1));
     }
 }

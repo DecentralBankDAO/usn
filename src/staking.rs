@@ -31,7 +31,7 @@ pub trait StackingPool {
     fn get_account(&self, account_id: AccountId) -> HumanReadableAccount;
 }
 
-pub fn stake(amount: U128, pool_id: AccountId) -> Promise {
+pub(crate) fn stake(amount: U128, pool_id: AccountId) -> Promise {
     assert!(
         amount.0 <= env::account_balance(),
         "The account doesn't have enough balance"
@@ -40,11 +40,11 @@ pub fn stake(amount: U128, pool_id: AccountId) -> Promise {
     ext_pool::deposit_and_stake(pool_id, amount.0, GAS_FOR_STAKE)
 }
 
-pub fn withdraw_all(pool_id: AccountId) -> Promise {
+pub(crate) fn withdraw_all(pool_id: AccountId) -> Promise {
     ext_pool::withdraw_all(pool_id, NO_DEPOSIT, GAS_FOR_WITHDRAW)
 }
 
-pub fn unstake(amount: U128, pool_id: AccountId) -> Promise {
+pub(crate) fn unstake(amount: U128, pool_id: AccountId) -> Promise {
     ext_pool::get_account(
         env::current_account_id(),
         pool_id.clone(),
@@ -60,7 +60,7 @@ pub fn unstake(amount: U128, pool_id: AccountId) -> Promise {
     ))
 }
 
-pub fn unstake_all(pool_id: AccountId) -> Promise {
+pub(crate) fn unstake_all(pool_id: AccountId) -> Promise {
     ext_pool::unstake_all(pool_id, NO_DEPOSIT, GAS_FOR_UNSTAKE)
 }
 

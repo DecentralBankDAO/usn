@@ -1366,3 +1366,57 @@ describe('Staking Pool', async function () {
     );
   });
 });
+
+describe('Transfer NEAR', function () {
+  this.timeout(15000);
+
+  it('should fail being called not by owner', async () => {
+    await assert.rejects(
+      async () => {
+        await global.aliceContract.transfer_near({
+          args: {
+            account_id: config.aliceId,
+            amount: TEN_NEARS,
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /This method can be called only by owner/);
+        return true;
+      }
+    );
+  });
+
+  it('should transfer certain amount of NEAR', async () => {
+    const nearAliceBalanceBefore = await global.aliceAccount.state();
+    const nearUsnBalanceBefore = await global.usnAccount.state();
+
+    await global.usnContract.transfer_near({
+      args: {
+        account_id: config.aliceId,
+        amount: TEN_NEARS,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const nearAliceBalanceAfter = await global.aliceAccount.state();
+    const nearUsnBalanceAfter = await global.usnAccount.state();
+
+    const aliceBalanceDifference = new BN(nearAliceBalanceAfter.amount)
+      .sub(new BN(nearAliceBalanceBefore.amount));
+    const usnBalanceDifference = new BN(nearUsnBalanceBefore.amount)
+      .sub(new BN(nearUsnBalanceAfter.amount));
+
+    assert(new BN(TEN_NEARS)
+      .sub(aliceBalanceDifference)
+      .lt(new BN('10000000000000000000000')) // Transfer loss < 0.01 NEAR
+    );
+    assert(new BN(TEN_NEARS)
+      .sub(usnBalanceDifference)
+      .lt(new BN('1000000000000000000000')) // Transfer loss < 0.001 NEAR
+    );
+  });
+});

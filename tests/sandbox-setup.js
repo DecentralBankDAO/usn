@@ -73,6 +73,7 @@ const usnMethods = {
     'transfer_commission',
     'add_stable_asset',
     'mint_by_near',
+    'transfer_near',
   ],
 };
 

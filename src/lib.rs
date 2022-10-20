@@ -27,7 +27,7 @@ use oracle::{ExchangeRate, Oracle, PriceData};
 use std::fmt::Debug;
 
 use crate::ft::FungibleTokenFreeStorage;
-use stable::{usdt_id, AssetInfo, CommissionRate, OldStableTreasury, StableTreasury};
+use stable::{usdt_id, AssetInfo, CommissionRate, StableTreasury};
 
 uint::construct_uint!(
     pub struct U256(4);
@@ -366,125 +366,8 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        use near_sdk::Timestamp;
-
-        #[derive(BorshSerialize, BorshDeserialize)]
-        struct ExchangeRate {
-            multiplier: u128,
-            decimals: u8,
-            timestamp: Timestamp,
-            recency_duration: Timestamp,
-        }
-        #[derive(BorshSerialize, BorshDeserialize)]
-        struct ExchangeRates {
-            pub current: ExchangeRate,
-            pub smooth: ExchangeRate,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct ExponentialSpreadParams {
-            pub min: f64,
-            pub max: f64,
-            pub scaler: f64,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        enum Spread {
-            Fixed(Balance),
-            Exponential(ExponentialSpreadParams),
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct CacheItem {
-            pub timestamp: Timestamp,
-            pub value: f64,
-            pub smoothed_value: f64,
-            pub n: u8,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct IntervalCache {
-            pub items: Vec<CacheItem>,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct TreasuryData {
-            pub cache: IntervalCache,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct ExchangeRateValue {
-            multiplier: U128,
-            decimals: u8,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct MinMaxRate {
-            max_previous: Option<ExchangeRateValue>,
-            max_current: Option<ExchangeRateValue>,
-            min_previous: Option<ExchangeRateValue>,
-            min_current: Option<ExchangeRateValue>,
-            timestamp: Timestamp,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct VolumeCacheItem {
-            usn: U128,
-            near: U128,
-            timestamp: Timestamp,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct VolumeCache {
-            time_slot: Timestamp,
-            max_age: Timestamp,
-            sum_usn: U128,
-            sum_near: U128,
-            items: Vec<VolumeCacheItem>,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct VolumeHistory {
-            pub one_hour: VolumeCache,
-            pub five_min: VolumeCache,
-        }
-
-        #[derive(BorshDeserialize, BorshSerialize)]
-        struct PrevContract {
-            owner_id: AccountId,
-            proposed_owner_id: AccountId,
-            guardians: UnorderedSet<AccountId>,
-            token: FungibleTokenFreeStorage,
-            metadata: LazyOption<FungibleTokenMetadata>,
-            black_list: LookupMap<AccountId, BlackListStatus>,
-            status: ContractStatus,
-            oracle: Oracle,
-            spread: Spread,
-            commission: CommissionV1,
-            treasury: LazyOption<TreasuryData>,
-            usn2near: VolumeHistory,
-            near2usn: VolumeHistory,
-            best_rate: MinMaxRate,
-            stable_treasury: OldStableTreasury,
-        }
-
-        let mut prev: PrevContract = env::state_read().expect("Contract is not initialized");
-
-        Self {
-            owner_id: prev.owner_id,
-            proposed_owner_id: prev.proposed_owner_id,
-            guardians: prev.guardians,
-            token: prev.token,
-            metadata: prev.metadata,
-            black_list: prev.black_list,
-            status: prev.status,
-            commission: prev.commission,
-            stable_treasury: StableTreasury::from_old(
-                &mut prev.stable_treasury,
-                StorageKey::StableTreasury,
-            ),
-            oracle: prev.oracle,
-        }
+        let prev: Contract = env::state_read().expect("Contract is not initialized");
+        prev
     }
 
     fn abort_if_pause(&self) {
@@ -805,6 +688,13 @@ impl Contract {
 
         self.token.internal_deposit(&account_id, amount);
         event::emit::ft_mint(&account_id, amount, None);
+    }
+
+    #[payable]
+    pub fn transfer_near(&mut self, account_id: AccountId, amount: U128) -> Promise {
+        assert_one_yocto();
+        self.assert_owner();
+        Promise::new(account_id).transfer(amount.into())
     }
 }
 

@@ -472,6 +472,10 @@ describe('User', async function () {
       account_id: config.aliceId,
     });
 
+    const usnBefore = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId
+    });
+
     // Alice gets USN.
     await global.aliceUsdt.ft_transfer_call({
       args: {
@@ -486,41 +490,31 @@ describe('User', async function () {
     const usdtAfter = await global.aliceUsdt.ft_balance_of({
       account_id: config.aliceId,
     });
+    const usnAfter = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId
+    });
     const commission = await global.usnContract.commission();
 
-    assert.equal(
-      new BN(usdtBefore).sub(new BN(usdtAfter)).toString(),
-      '1000000000000'
-    );
-    assert.equal(
-      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
-      '999900000000000000000000'
-    );
-    assert.equal(commission.v2.usn, '100000000000000000000');
+    assert.equal(usdtBefore, usdtAfter);
+    assert.equal(usnBefore, usnAfter);
+    assert.equal(commission.v2.usn, '0');
 
-    // Alice swaps USN to USDT.
-    await global.aliceContract.withdraw({
-      args: {
-        amount: '999900000000000000000000',
+    await assert.rejects(
+      async () => {
+        // Alice swaps USN to USDT.
+        await global.aliceContract.withdraw({
+          args: {
+            amount: '999900000000000000000000',
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
       },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    const usdtAfter2 = await global.aliceUsdt.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    const commission2 = await global.usnContract.commission();
-
-    assert.equal(
-      new BN(usdtAfter2).sub(new BN(usdtAfter)).toString(),
-      '999800010000'
+      (err) => {
+        assert.match(err.message, /The account doesn't have enough balance/);
+        return true;
+      }
     );
-    assert.equal(
-      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
-      '0'
-    );
-    assert.equal(commission2.v2.usn, '199990000000000000000');
   });
 
   it('should deposit USDT and withdraw USDC', async () => {
@@ -538,7 +532,10 @@ describe('User', async function () {
     const usdtBefore = await global.aliceUsdt.ft_balance_of({
       account_id: config.aliceId,
     });
-    const commissionBefore = await global.usnContract.commission();
+
+    const usnBefore = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId
+    });
 
     // Alice gets USN.
     await global.aliceUsdt.ft_transfer_call({
@@ -554,19 +551,14 @@ describe('User', async function () {
     const usdtAfter = await global.aliceUsdt.ft_balance_of({
       account_id: config.aliceId,
     });
-    const commissionAfter = await global.usnContract.commission();
+    const usnAfter = await global.aliceContract.ft_balance_of({
+      account_id: config.aliceId
+    });
+    const commission = await global.usnContract.commission();
 
-    assert.equal(
-      new BN(usdtBefore).sub(new BN(usdtAfter)).toString(),
-      '1000000000000'
-    );
-    assert.equal(
-      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
-      '999900000000000000000000'
-    );
-    assert.equal(new BN(commissionAfter.v2.usn)
-      .sub(new BN(commissionBefore.v2.usn)).toString(),
-      '100000000000000000000');
+    assert.equal(usdtBefore, usdtAfter);
+    assert.equal(usnBefore, usnAfter);
+    assert.equal(commission.v2.usn, '0');
 
     await global.usnContract.add_stable_asset({
       args: {
@@ -583,33 +575,23 @@ describe('User', async function () {
       }
     });
 
-    // Alice swaps USN to USDC.
-    await global.aliceContract.withdraw({
-      args: {
-        asset_id: config.usdcId,
-        amount: '999900000000000000000000',
+    await assert.rejects(
+      async () => {
+        // Alice swaps USN to USDC.
+        await global.aliceContract.withdraw({
+          args: {
+            asset_id: config.usdcId,
+            amount: '999900000000000000000000',
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
       },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    const usdcBalance = await global.aliceUsdc.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    const usdtAfter2 = await global.aliceUsdt.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    const commissionAfter2 = await global.usnContract.commission();
-
-    assert.equal(usdcBalance, '997900200000');
-    assert.equal(usdtAfter2, usdtAfter);
-    assert.equal(
-      await global.aliceContract.ft_balance_of({ account_id: config.aliceId }),
-      '0'
+      (err) => {
+        assert.match(err.message, /The account doesn't have enough balance/);
+        return true;
+      }
     );
-    assert.equal(new BN(commissionAfter2.v2.usn)
-      .sub(new BN(commissionAfter.v2.usn)).toString(),
-      '1999800000000000000000');
   });
 
   it('should have withdrawn all USN to get unregistered', async () => {
@@ -638,23 +620,30 @@ describe('User', async function () {
       amount: ONE_YOCTO,
       gas: GAS_FOR_CALL,
     });
-    // Deposit $USN on ref.finance.
-    await global.aliceContract.ft_transfer({
-      args: {
-        receiver_id: config.carolId,
-        amount: '1000000000000000000',
-        msg: '',
+
+    await assert.rejects(
+      async () => {
+        // Deposit $USN on ref.finance.
+        await global.aliceContract.ft_transfer({
+          args: {
+            receiver_id: config.carolId,
+            amount: '1000000000000000000',
+            msg: '',
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
       },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
+      (err) => {
+        assert.match(err.message, /The account doesn't have enough balance/);
+        return true;
+      }
+    );
 
     assert.equal(
       await global.carolContract.ft_balance_of({ account_id: config.carolId }),
-      '1000000000000000000'
+      '0'
     );
-
-    const commissionBefore = await global.usnContract.commission();
 
     // Try to withdraw
     await assert.rejects(
@@ -668,7 +657,7 @@ describe('User', async function () {
         });
       },
       (err) => {
-        assert.match(err.message, /not registered/);
+        assert.match(err.message, /The account doesn't have enough balance/);
         return true;
       }
     );
@@ -681,9 +670,9 @@ describe('User', async function () {
     );
     assert.equal(
       await global.carolContract.ft_balance_of({ account_id: config.carolId }),
-      '1000000000000000000'
+      '0'
     );
-    assert.equal(commissionBefore.v2.usn, commissionAfter.v2.usn);
+    assert.equal(commissionAfter.v2.usn, '0');
   });
 
   it('should fail to deposit due to low attached gas', async () => {
@@ -795,7 +784,7 @@ describe('User', async function () {
         });
       },
       (err) => {
-        assert.match(err.message, /Exceeded the prepaid gas./);
+        assert.match(err.message, /Not enough USN: specified amount exchanges to 0 tokens/);
         return true;
       }
     );
@@ -873,22 +862,29 @@ describe('Commission transfer', function () {
     const commissionBefore = await global.usnContract.commission();
     const transfer_amount = '10000000000';
 
-    await global.usnContract.transfer_commission({
-      args: {
-        account_id: config.aliceId,
-        amount: transfer_amount,
+    await assert.rejects(
+      async () => {
+        await global.usnContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: transfer_amount,
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Exceeded the commission v2 amount/);
+        return true;
       }
-    });
+    );
 
     const commissionAfter = await global.usnContract.commission();
     const userBalance = await global.usnContract.ft_balance_of({
       account_id: config.aliceId,
     });
 
-    assert.equal(userBalance, transfer_amount);
-    assert(new BN(commissionBefore.v2.usn, 10)
-      .sub(new BN(transfer_amount, 10))
-      .eq(new BN(commissionAfter.v2.usn, 10)));
+    assert.equal(userBalance, '0');
+    assert.equal(commissionBefore.v2.usn, '0');
+    assert.equal(commissionAfter.v2.usn, '0');
   });
 
   it('should fail trying to transfer more than account has', async () => {
@@ -910,26 +906,30 @@ describe('Commission transfer', function () {
 
   it('should transfer all commission amount', async () => {
     const commissionBefore = await global.usnContract.commission();
-    const userBalanceBefore = await global.usnContract.ft_balance_of({
-      account_id: config.aliceId,
-    });
 
-    await global.usnContract.transfer_commission({
-      args: {
-        account_id: config.aliceId,
-        amount: commissionBefore.v2.usn,
+    await assert.rejects(
+      async () => {
+        await global.usnContract.transfer_commission({
+          args: {
+            account_id: config.aliceId,
+            amount: commissionBefore.v2.usn,
+          }
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Amount should be positive/);
+        return true;
       }
-    });
+    );
 
     const commissionAfter = await global.usnContract.commission();
     const userBalanceAfter = await global.usnContract.ft_balance_of({
       account_id: config.aliceId,
     });
 
+    assert.equal(commissionBefore.v2.usn, '0');
     assert.equal(commissionAfter.v2.usn, '0');
-    assert(new BN(userBalanceBefore, 10)
-      .add(new BN(commissionBefore.v2.usn, 10))
-      .eq(new BN(userBalanceAfter, 10)));
+    assert.equal(userBalanceAfter, '0');
   });
 
   it('should fail as there is no commission', async () => {

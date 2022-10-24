@@ -366,8 +366,8 @@ impl Contract {
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
-        let prev: Contract = env::state_read().expect("Contract is not initialized");
-        prev
+        let contract: Contract = env::state_read().expect("Contract is not initialized");
+        contract
     }
 
     fn abort_if_pause(&self) {
@@ -486,25 +486,14 @@ impl FungibleTokenMetadataProvider for Contract {
 
 #[near_bindgen]
 impl FungibleTokenReceiver for Contract {
+    #[allow(unused_variables)]
     fn ft_on_transfer(
         &mut self,
         sender_id: AccountId,
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        self.abort_if_pause();
-        self.abort_if_blacklisted(&sender_id);
-
-        // Empty message is used for stable coin depositing.
-        assert!(msg.is_empty());
-
-        let token_id = env::predecessor_account_id();
-
-        self.stable_treasury
-            .deposit(&mut self.token, &sender_id, &token_id, amount.into());
-
-        // Unused tokens: 0.
-        PromiseOrValue::Value(U128(0))
+        env::panic_str("Mint of USN is disabled");
     }
 }
 
@@ -911,6 +900,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Mint of USN is disabled")]
     fn test_deposit_auto_registration() {
         let mut context = get_context(accounts(1));
         testing_env!(context.build());

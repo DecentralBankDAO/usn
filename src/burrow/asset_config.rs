@@ -83,7 +83,9 @@ impl AssetConfig {
         total_supplied_balance: Balance,
         token_id: &TokenId,
     ) -> BigDecimal {
-        if total_supplied_balance == 0 {
+        if total_supplied_balance == 0 && !is_usn(token_id)
+            || borrowed_balance == 0 && is_usn(token_id)
+        {
             BigDecimal::one()
         } else {
             let pos = if is_usn(token_id) {

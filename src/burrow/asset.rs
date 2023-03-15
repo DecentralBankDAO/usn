@@ -100,14 +100,6 @@ impl Asset {
             rate.pow(time_diff_ms).round_mul_u128(self.borrowed.balance) - self.borrowed.balance;
         // TODO: Split interest based on ratio between reserved and supplied?
         let reserved = ratio(interest, self.config.reserve_ratio);
-
-        if is_usn(token_id) {
-            self.supplied.usn_interest += interest - reserved;
-            self.reserved += reserved;
-            self.borrowed.usn_interest += interest;
-            return;
-        }
-
         if self.supplied.shares.0 > 0 {
             self.supplied.balance += interest - reserved;
             self.reserved += reserved;

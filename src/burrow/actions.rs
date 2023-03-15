@@ -15,11 +15,11 @@ pub struct AssetAmount {
 }
 
 impl AssetAmount {
-    pub fn new(token_id: &TokenId, amount: Balance) -> Self {
+    pub fn new(token_id: &TokenId, amount: Option<U128>, max_amount: Option<U128>) -> Self {
         Self {
             token_id: token_id.clone(),
-            amount: Some(amount.into()),
-            max_amount: None,
+            amount,
+            max_amount,
         }
     }
 }
@@ -97,11 +97,7 @@ impl Burrow {
                     need_risk_check = true;
 
                     let amount = amount.into();
-                    self.increase_usn_asset_supply(amount);
-
-                    let asset_amount = AssetAmount::new(&usn_id(), amount);
-                    self.internal_borrow(account, &asset_amount);
-                    self.internal_withdraw(account, &asset_amount);
+                    self.borrow_usn(account, amount);
 
                     token.internal_deposit(&account.account_id, amount);
                     event::emit::ft_mint(&account.account_id, amount, Some("Borrow mint"));
@@ -116,23 +112,10 @@ impl Burrow {
                     account.internal_set_asset(&asset_amount.token_id, account_asset);
                 }
                 Action::RepayUsn(amount) => {
-                    let (borrow_amount, repay_amount) =
-                        self.withdraw_usn_interest(account, amount.0);
-
-                    token.internal_withdraw(&account_id, repay_amount);
-                    event::emit::ft_burn(&account_id, repay_amount, Some("Repay burn"));
-
-                    self.internal_deposit(account, &usn_id(), borrow_amount);
-
-                    // Get updated supplied amount after internal deposit
-                    let mut account_asset = account.internal_unwrap_asset(&usn_id());
-                    let asset_amount = AssetAmount::new(&usn_id(), borrow_amount);
-
-                    self.internal_repay(&mut account_asset, account, &asset_amount);
-                    self.decrease_usn_asset_supply(borrow_amount);
-
-                    account.internal_set_asset(&usn_id(), account_asset);
-                    events::emit::repay(&account_id, repay_amount, &usn_id());
+                    let amount = self.repay_usn(account, amount.into());
+                    token.internal_withdraw(&account_id, amount);
+                    event::emit::ft_burn(&account_id, amount, Some("Repay burn"));
+                    events::emit::repay(&account_id, amount, &usn_id());
                 }
                 Action::Liquidate {
                     account_id: liquidation_account_id,
@@ -277,23 +260,6 @@ impl Burrow {
         amount
     }
 
-    fn increase_usn_asset_supply(&mut self, amount: Balance) {
-        let mut usn_account = self.internal_unwrap_account(&usn_id());
-        self.internal_deposit(&mut usn_account, &usn_id(), amount);
-        self.internal_set_account(&usn_id(), usn_account);
-    }
-
-    fn decrease_usn_asset_supply(&mut self, amount: Balance) -> Balance {
-        let mut usn_account = self.internal_unwrap_account(&usn_id());
-        let usn_asset_amount = AssetAmount::new(&usn_id(), amount);
-
-        // Withdraw USN from supply
-        self.internal_withdraw(&mut usn_account, &usn_asset_amount);
-        self.internal_set_account(&usn_id(), usn_account);
-
-        amount
-    }
-
     pub fn internal_borrow(
         &mut self,
         account: &mut Account,
@@ -327,6 +293,19 @@ impl Burrow {
 
         account_asset.deposit_shares(supplied_shares);
         account.internal_set_asset(&asset_amount.token_id, account_asset);
+
+        amount
+    }
+
+    pub fn borrow_usn(&mut self, account: &mut Account, amount: Balance) -> Balance {
+        let mut asset = self.internal_unwrap_asset(&usn_id());
+        assert!(asset.config.can_borrow, "This asset can't be used borrowed");
+
+        let borrowed_shares = asset.borrowed.amount_to_shares(amount, false);
+        asset.borrowed.deposit(borrowed_shares, amount);
+        self.internal_set_asset(&usn_id(), asset);
+
+        account.increase_borrowed(&usn_id(), borrowed_shares);
 
         amount
     }
@@ -372,35 +351,25 @@ impl Burrow {
         amount
     }
 
-    fn withdraw_usn_interest(
-        &mut self,
-        account: &Account,
-        repay_amount: Balance,
-    ) -> (Balance, Balance) {
+    fn repay_usn(&mut self, account: &mut Account, amount: Balance) -> Balance {
         let mut asset = self.internal_unwrap_asset(&usn_id());
-
-        // Get user borrowed shares.
+        let asset_amount = AssetAmount::new(&usn_id(), None, Some(amount.into()));
         let available_borrowed_shares = account.internal_unwrap_borrowed(&usn_id());
 
-        // Get borrow amount from repay amount.
-        let borrow_amount = self.without_usn_interest(repay_amount);
+        let (borrowed_shares, amount) = asset_amount_to_shares(
+            &asset.borrowed,
+            available_borrowed_shares,
+            &asset_amount,
+            true,
+        );
+        assert!(borrowed_shares.0 > 0, "Shares can't be 0");
 
-        // In case repay amount is bigger than actual borrow, repay amount = actual borrow.
-        let borrowed_shares: U128 = std::cmp::min(
-            asset.borrowed.amount_to_shares(borrow_amount, true).0,
-            available_borrowed_shares.0,
-        )
-        .into();
-
-        let borrow_amount = asset.borrowed.shares_to_amount(borrowed_shares, true);
-        // Recalculate borrow interest according to new borrow amount.
-        let borrow_interest = self.calculate_usn_interest(borrow_amount);
-
-        // Decrease borrowed interest on repaid one.
-        asset.borrowed.usn_interest -= borrow_interest;
+        asset.borrowed.withdraw(borrowed_shares, amount);
         self.internal_set_asset(&usn_id(), asset);
 
-        (borrow_amount, borrow_amount + borrow_interest)
+        account.decrease_borrowed(&usn_id(), borrowed_shares);
+
+        amount
     }
 
     pub fn internal_liquidate(
@@ -424,28 +393,15 @@ impl Burrow {
         let mut collateral_taken_sum = BigDecimal::zero();
 
         for asset_amount in in_assets {
-            let (amount, account_asset) = if is_usn(&asset_amount.token_id) {
+            let amount = if is_usn(&asset_amount.token_id) {
                 assert!(
                     is_usn(&account.account_id),
                     "Liquidation of USN asset should be done only by USN account"
                 );
-                let amount = asset_amount
-                    .amount
-                    .expect("Amount should be specified")
-                    .into();
-                let (borrow_amount, repay_amount) =
-                    self.withdraw_usn_interest(&liquidation_account, amount);
+                let amount = self.unwrap_asset_amount(&asset_amount);
+                self.repay_usn(&mut liquidation_account, amount);
 
-                // Increase deposit for USN account
-                self.internal_deposit(account, &usn_id(), borrow_amount);
-
-                let mut account_asset = account.internal_unwrap_asset(&usn_id());
-                let asset_amount = AssetAmount::new(&usn_id(), borrow_amount);
-
-                self.internal_repay(&mut account_asset, &mut liquidation_account, &asset_amount);
-                self.decrease_usn_asset_supply(borrow_amount);
-
-                (repay_amount, account_asset)
+                amount
             } else {
                 liquidation_account
                     .add_affected_farm(FarmId::Borrowed(asset_amount.token_id.clone()));
@@ -456,10 +412,11 @@ impl Burrow {
                     &mut liquidation_account,
                     &asset_amount,
                 );
-                (amount, account_asset)
+                account.internal_set_asset(&asset_amount.token_id, account_asset);
+
+                amount
             };
 
-            account.internal_set_asset(&asset_amount.token_id, account_asset);
             let asset = self.internal_unwrap_asset(&asset_amount.token_id);
 
             borrowed_repaid_sum = borrowed_repaid_sum
@@ -595,8 +552,7 @@ impl Burrow {
                 .iter()
                 .fold(BigDecimal::zero(), |sum, (token_id, shares)| {
                     let asset = self.internal_unwrap_asset(&token_id);
-                    let balance = asset.supplied.shares_to_amount(*shares, false)
-                        + asset.supplied.usn_interest;
+                    let balance = asset.supplied.shares_to_amount(*shares, false);
                     sum + BigDecimal::from_balance_price(
                         balance,
                         prices.get_unwrap(&token_id),
@@ -611,8 +567,7 @@ impl Burrow {
                 .iter()
                 .fold(BigDecimal::zero(), |sum, (token_id, shares)| {
                     let asset = self.internal_unwrap_asset(&token_id);
-                    let balance = asset.borrowed.shares_to_amount(*shares, true)
-                        + asset.borrowed.usn_interest;
+                    let balance = asset.borrowed.shares_to_amount(*shares, true);
                     sum + BigDecimal::from_balance_price(
                         balance,
                         prices.get_unwrap(&token_id),
@@ -628,34 +583,11 @@ impl Burrow {
         }
     }
 
-    pub fn calculate_usn_interest(&self, amount: Balance) -> Balance {
-        let asset = self.internal_unwrap_asset(&usn_id());
-
-        u128_ratio(
-            amount,
-            asset.borrowed.usn_interest,
-            asset.borrowed.balance,
-            true,
-        )
-    }
-
-    pub fn without_usn_interest(&self, repay_amount: Balance) -> Balance {
-        let asset = self.internal_unwrap_asset(&usn_id());
-
-        // Get borrow amount from repay amount.
-        // borrow_amount / total_borrow = interest / total_interest
-        // borrow_amount + interest = repay_amount
-        // borrow_amount / total_borrowed = (repay_amount - borrow_amount) / total_interest.
-        // borrow_amount = repay_amount * total_borrowed / (total_borrowed + total_interest).
-        // e.g. repay_amount = 51, total_borrowed = 150, total_interest = 3
-        // borrow_amount = (51 * 150) / (3 + 150) = 50
-        u128_ratio(
-            repay_amount,
-            asset.borrowed.balance,
-            (U256::from(asset.borrowed.usn_interest) + U256::from(asset.borrowed.balance))
-                .as_u128(),
-            false,
-        )
+    fn unwrap_asset_amount(&self, asset_amount: &AssetAmount) -> Balance {
+        asset_amount
+            .amount
+            .expect("Amount should be specified")
+            .into()
     }
 }
 

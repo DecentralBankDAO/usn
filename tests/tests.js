@@ -1770,29 +1770,6 @@ describe('Borrow USN', async function () {
   this.timeout(25000);
 
   before(async () => {
-    await usdtContract.mint({
-      args: { account_id: config.carolId, amount: '100000000000000' },
-    });
-
-    await global.carolUsdt.ft_transfer({
-      args: {
-        receiver_id: config.aliceId,
-        amount: '100000000000000',
-      },
-      amount: ONE_YOCTO,
-    });
-
-    // Fill Alice account with USN
-    await global.aliceUsdt.ft_transfer_call({
-      args: {
-        receiver_id: config.usnId,
-        amount: '100000000000000',
-        msg: '',
-      },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
     const amountCollateral = '100000000000';
     const msgCollateral = '{\"Execute\": {\"actions\": [{\"IncreaseCollateral\": {\"token_id\": \"weth.test.near\", \"amount\":\"100000000000\"}}]}}';
 
@@ -1806,44 +1783,6 @@ describe('Borrow USN', async function () {
       amount: ONE_YOCTO,
       gas: GAS_FOR_CALL,
     });
-  });
-
-  it('should fail as deposits are not allowed for USN', async () => {
-    const aliceUsnBefore = await global.usnContract.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    const usnBalanceBefore = await global.usnContract.ft_balance_of({
-      account_id: config.usnId,
-    });
-
-    // Alice tries to deposit USN
-    await global.aliceContract.ft_transfer_call({
-      args: {
-        receiver_id: config.usnId,
-        amount: '100000000',
-        msg: '\"Supply\"',
-      },
-      amount: ONE_YOCTO,
-      gas: GAS_FOR_CALL,
-    });
-
-    const aliceUsnAfter = await global.usnContract.ft_balance_of({
-      account_id: config.aliceId,
-    });
-    const usnBalanceAfter = await global.usnContract.ft_balance_of({
-      account_id: config.usnId,
-    });
-    const asset = await global.usnContract.get_asset({
-      token_id: config.usnId,
-    });
-    const account = await global.usnContract.get_account({
-      account_id: config.aliceId,
-    });
-
-    assert.equal(aliceUsnBefore, aliceUsnAfter);
-    assert.equal(usnBalanceBefore, usnBalanceAfter);
-    assert.equal(asset.supplied.balance, '0');
-    assert.equal(account.supplied.length, 0);
   });
 
   it('should be able to borrow USN', async () => {
@@ -1880,15 +1819,52 @@ describe('Borrow USN', async function () {
     assert.equal(new BN(aliceUsnAfter)
       .sub(new BN(aliceUsnBefore)).toString(),
       amount);
-    assert.equal(asset.supplied.balance, amount);
+    assert.equal(asset.supplied.balance, '0');
     assert.equal(asset.borrowed.balance, amount);
     assert.equal(asset.borrow_apr, '0.024903108674625580324879543');
     assert.equal(asset.supply_apr, '0.0');
-    assert.equal(usnAccount.supplied[0].balance, amount);
-    assert.equal(usnAccount.supplied[0].token_id, config.usnId);
+    assert.equal(usnAccount.supplied.length, 0);
     assert.equal(aliceAccount.borrowed[0].balance, amount);
     assert.equal(aliceAccount.borrowed[0].token_id, config.usnId);
     assert.equal(aliceAccount.supplied.length, 0);
+  });
+
+  it('should fail as deposits are not allowed for USN', async () => {
+    const aliceUsnBefore = await global.usnContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnBalanceBefore = await global.usnContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+
+    // Alice tries to deposit USN
+    await global.aliceContract.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: '1000000',
+        msg: '\"Supply\"',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceUsnAfter = await global.usnContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnBalanceAfter = await global.usnContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const asset = await global.usnContract.get_asset({
+      token_id: config.usnId,
+    });
+    const account = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(aliceUsnBefore, aliceUsnAfter);
+    assert.equal(usnBalanceBefore, usnBalanceAfter);
+    assert.equal(asset.supplied.balance, '0');
+    assert.equal(account.supplied.length, 0);
   });
 
   it('should fail to borrow USN as to not enough collateral', async () => {
@@ -1900,9 +1876,6 @@ describe('Borrow USN', async function () {
     });
     const aliceAccountBefore = await global.usnContract.get_account({
       account_id: config.aliceId,
-    });
-    const usnAccountBefore = await global.usnContract.get_account({
-      account_id: config.usnId,
     });
 
     const amount = '1000000000000000';
@@ -1940,12 +1913,11 @@ describe('Borrow USN', async function () {
     });
 
     assert.equal(aliceUsnAfter, aliceUsnBefore);
-    assert.equal(assetBefore.supplied.balance, assetAfter.supplied.balance);
+    assert.equal(assetAfter.supplied.balance, '0');
     assert.equal(assetBefore.borrowed.balance, assetAfter.borrowed.balance);
     assert.equal(assetAfter.borrow_apr, '0.024903108674625580324879543');
     assert.equal(assetAfter.supply_apr, '0.0');
-    assert.equal(usnAccountAfter.supplied[0].balance, usnAccountBefore.supplied[0].balance);
-    assert.equal(usnAccountAfter.supplied[0].token_id, config.usnId);
+    assert.equal(usnAccountAfter.supplied.length, 0);
     assert.equal(aliceAccountAfter.borrowed[0].balance, aliceAccountBefore.borrowed[0].balance);
     assert.equal(aliceAccountAfter.borrowed[0].token_id, config.usnId);
     assert.equal(aliceAccountAfter.supplied.length, 0);
@@ -1959,7 +1931,7 @@ describe('Borrow USN', async function () {
       account_id: config.aliceId,
     });
 
-    const repay_amount = new BN(aliceAccountBefore.borrowed[0].balance).add(new BN(aliceAccountBefore.borrowed[0].interest)).toString();
+    const repay_amount = aliceAccountBefore.borrowed[0].balance;
     const msg = '{\"Execute\": {\"actions\": [{\"RepayUsn\": \"' + repay_amount + '\"}]}}';
 
     // Alice repays USN
@@ -1998,7 +1970,8 @@ describe('Borrow USN', async function () {
   });
 
   it('should be able repay in case specifying bigger amount', async () => {
-    const msgBorrow = '{\"Execute\": {\"actions\": [{\"BorrowUsn\": \"1000000\"}]}}';
+    const amount = '1000000';
+    const msgBorrow = '{\"Execute\": {\"actions\": [{\"BorrowUsn\": \"' + amount + '\"}]}}';
 
     // Alice borrows USN
     await global.aliceOracle.oracle_call({
@@ -2013,11 +1986,7 @@ describe('Borrow USN', async function () {
     const aliceUsnBefore = await global.usnContract.ft_balance_of({
       account_id: config.aliceId,
     });
-    const assetBefore = await global.usnContract.get_asset({
-      token_id: config.usnId,
-    });
 
-    const amount = '1000000';
     const msgRepay = '{\"Execute\": {\"actions\": [{\"RepayUsn\": \"100000000000\"}]}}';
 
     // Alice repays USN
@@ -2074,14 +2043,11 @@ describe('Borrow USN', async function () {
     const assetBefore = await global.usnContract.get_asset({
       token_id: config.usnId,
     });
-    const usnAccountBefore = await global.usnContract.get_account({
-      account_id: config.usnId,
-    });
     const aliceAccounBefore = await global.usnContract.get_account({
       account_id: config.aliceId,
     });
 
-    const repayAmount = '100001';
+    const repayAmount = '100000';
     const msgRepay = '{\"Execute\": {\"actions\": [{\"RepayUsn\": \"' + repayAmount + '\"}]}}';
 
     // Alice repays USN
@@ -2110,22 +2076,19 @@ describe('Borrow USN', async function () {
     assert.equal(new BN(aliceUsnBefore)
       .sub(new BN(aliceUsnAfter)).toString(),
       repayAmount);
-    assert.equal(repayAmount, new BN(assetBefore.supplied.balance)
-      .sub(new BN(assetAfter.supplied.balance)).toString());
+    assert.equal(assetAfter.supplied.balance, '0');
     assert.equal(repayAmount, new BN(assetBefore.borrowed.balance)
       .sub(new BN(assetAfter.borrowed.balance)).toString());
     assert.equal(assetAfter.borrow_apr, '0.024903108674625580324879543');
     assert.equal(assetAfter.supply_apr, '0.0');
 
-    assert.equal(repayAmount, new BN(usnAccountBefore.supplied[0].balance)
-      .sub(new BN(usnAccountAfter.supplied[0].balance)).toString());
+    assert.equal(usnAccountAfter.supplied.length, 0);
     assert.equal(repayAmount, new BN(aliceAccounBefore.borrowed[0].balance)
       .sub(new BN(aliceAccountAfter.borrowed[0].balance)).toString());
     assert.equal(aliceAccountAfter.supplied.length, 0);
   });
 
   it('should fail to repay USN as to not enough balance', async () => {
-    const amount = '1000000';
     const msgBorrow = '{\"Execute\": {\"actions\": [{\"BorrowUsn\": \"1000000\"}]}}';
 
     // Alice borrows USN
@@ -2158,9 +2121,6 @@ describe('Borrow USN', async function () {
     });
     const aliceAccountBefore = await global.usnContract.get_account({
       account_id: config.aliceId,
-    });
-    const usnAccountBefore = await global.usnContract.get_account({
-      account_id: config.usnId,
     });
     const msgRepay = '{\"Execute\": {\"actions\": [{\"RepayUsn\": \"1000000\"}]}}';
 
@@ -2196,12 +2156,11 @@ describe('Borrow USN', async function () {
     });
 
     assert.equal(aliceUsnAfter, aliceUsnBefore);
-    assert.equal(assetBefore.supplied.balance, assetAfter.supplied.balance);
-    assert.equal(assetBefore.borrowed.balance, assetAfter.borrowed.balance);
+    assert.equal(assetAfter.supplied.balance, '0');
+    assert(new BN(assetBefore.borrowed.balance).lte(new BN(assetAfter.borrowed.balance)));
     assert.equal(assetAfter.borrow_apr, '0.024903108674625580324879543');
     assert.equal(assetAfter.supply_apr, '0.0');
-    assert.equal(usnAccountAfter.supplied[0].balance, usnAccountBefore.supplied[0].balance);
-    assert.equal(usnAccountAfter.supplied[0].token_id, config.usnId);
+    assert.equal(usnAccountAfter.supplied.length, 0);
     assert.equal(aliceAccountAfter.borrowed[0].balance, aliceAccountBefore.borrowed[0].balance);
     assert.equal(aliceAccountAfter.borrowed[0].token_id, config.usnId);
     assert.equal(aliceAccountAfter.supplied.length, 0);
@@ -2247,9 +2206,6 @@ describe('Borrow USN', async function () {
     const aliceAccountBefore = await global.usnContract.get_account({
       account_id: config.aliceId,
     });
-    const usnAccountBefore = await global.usnContract.get_account({
-      account_id: config.usnId,
-    });
 
     const liquidationAmount = '100000000000';
     const collateralAmount = '100000';
@@ -2285,8 +2241,7 @@ describe('Borrow USN', async function () {
     assert.equal(aliceUsnBefore, aliceUsnAfter);
     assert.equal(wethBefore.supplied.balance, wethAfter.supplied.balance);
 
-    assert(new BN(usnBefore.supplied.balance)
-      .sub(new BN(usnAfter.supplied.balance)).lt(new BN(liquidationAmount)));
+    assert(usnAfter.supplied.balance, '0');
     assert(new BN(usnBefore.borrowed.balance)
       .sub(new BN(usnAfter.borrowed.balance)).lt(new BN(liquidationAmount)));
 
@@ -2298,12 +2253,8 @@ describe('Borrow USN', async function () {
     assert(new BN(aliceAccountBefore.borrowed[0].balance)
       .sub(new BN(aliceAccountAfter.borrowed[0].balance)).lt(new BN(liquidationAmount)));
 
-    assert.equal(usnAccountAfter.supplied[0].token_id, config.usnId);
-    assert(new BN(usnAccountBefore.supplied[0].balance)
-      .sub(new BN(usnAccountAfter.supplied[0].balance)).lt(new BN(liquidationAmount)));
-    assert.equal(usnAccountAfter.supplied[1].token_id, config.wethId);
-    assert.equal(usnAccountAfter.supplied[1].balance, collateralAmount);
-
-    assert.equal(usnAfter.borrowed.balance, usnAfter.supplied.balance);
+    assert(usnAccountAfter.supplied.length, 1);
+    assert.equal(usnAccountAfter.supplied[0].token_id, config.wethId);
+    assert.equal(usnAccountAfter.supplied[0].balance, collateralAmount);
   });
 });

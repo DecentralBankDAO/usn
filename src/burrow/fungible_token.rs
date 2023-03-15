@@ -26,6 +26,7 @@ impl Burrow {
         sender_id: AccountId,
         amount: U128,
         msg: String,
+        token: &mut FungibleTokenFreeStorage,
     ) -> PromiseOrValue<U128> {
         let token_id = env::predecessor_account_id();
         let mut asset = self.internal_unwrap_asset(&token_id);
@@ -56,7 +57,7 @@ impl Burrow {
         account.add_affected_farm(FarmId::Supplied(token_id.clone()));
         self.internal_deposit(&mut account, &token_id, amount);
         events::emit::deposit(&sender_id, amount, &token_id);
-        self.internal_execute(&sender_id, &mut account, actions, Prices::new());
+        self.internal_execute(&sender_id, &mut account, actions, Prices::new(), token);
         self.internal_set_account(&sender_id, account);
 
         PromiseOrValue::Value(U128(0))

@@ -1,20 +1,20 @@
 [package]
 edition = "2018"
 name = "usn"
-version = "2.3.2"
+version = "3.0.0-pre2.0"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-easy-ml = "1.8.1"
-getrandom = {version = "0.2", default-features = false, features = ["custom"]}
 near-contract-standards = "=4.0.0-pre.7"
 near-sdk = {version = "=4.0.0-pre.7", features = ["unstable"]}
-partial-min-max = "0.4.0"
-rand = {version = "0.8.5", default-features = false, features = ["std_rng"]}
 uint = {version = "=0.9.0", default-features = false}
 once_cell = "=1.8.0"
+
+[dev-dependencies]
+getrandom = {version = "0.2", default-features = false, features = ["custom"]}
+rand = {version = "0.8.5", default-features = false, features = ["std_rng"]}
 
 [profile.release]
 codegen-units = 1

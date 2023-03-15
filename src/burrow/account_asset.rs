@@ -49,7 +49,8 @@ impl AccountAsset {
 
 impl Account {
     pub fn internal_unwrap_asset(&self, token_id: &TokenId) -> AccountAsset {
-        self.internal_get_asset(token_id).expect("Asset not found")
+        self.internal_get_asset(token_id)
+            .expect(&format!("Asset {} not found", token_id))
     }
 
     pub fn internal_get_asset(&self, token_id: &TokenId) -> Option<AccountAsset> {

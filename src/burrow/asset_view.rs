@@ -49,8 +49,10 @@ impl Burrow {
                 rewards: asset_farm.rewards,
             })
             .collect();
-        let supply_apr = asset.get_supply_apr();
-        let borrow_apr = asset.get_borrow_apr();
+
+        let supply_apr = asset.get_supply_apr(&token_id);
+        let borrow_apr = asset.get_borrow_apr(&token_id);
+
         let Asset {
             supplied,
             borrowed,
@@ -58,6 +60,7 @@ impl Burrow {
             last_update_timestamp,
             config,
         } = asset;
+
         AssetDetailedView {
             token_id,
             supplied,

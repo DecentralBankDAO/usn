@@ -10,6 +10,9 @@ pub struct Pool {
     pub shares: Shares,
     #[serde(with = "u128_dec_format")]
     pub balance: Balance,
+    /// Accumulated USN interest. For other assets it stores in 'borrowed' field, this one is always 0
+    #[serde(with = "u128_dec_format")]
+    pub usn_interest: Balance,
 }
 
 impl Pool {
@@ -17,6 +20,7 @@ impl Pool {
         Self {
             shares: 0.into(),
             balance: 0,
+            usn_interest: 0,
         }
     }
 

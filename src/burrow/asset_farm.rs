@@ -93,6 +93,7 @@ impl AssetFarm {
                     reward.reward_per_day,
                     u128::from(time_diff),
                     u128::from(NANOS_PER_DAY),
+                    false,
                 ),
             );
             reward.remaining_rewards -= acquired_rewards;

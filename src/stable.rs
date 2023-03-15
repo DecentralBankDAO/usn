@@ -50,13 +50,6 @@ impl Default for CommissionRate {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct OldAssetInfo {
-    decimals: u8,
-    commission: U128,
-    status: AssetStatus,
-}
-
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetInfo {
@@ -85,20 +78,6 @@ impl AssetInfo {
     pub fn commission(&self) -> U128 {
         self.commission
     }
-}
-
-fn copy_asset_info(old_asset_info: &OldAssetInfo) -> AssetInfo {
-    AssetInfo {
-        decimals: old_asset_info.decimals,
-        status: old_asset_info.status.clone(),
-        commission: old_asset_info.commission,
-        commission_rate: CommissionRate::default(),
-    }
-}
-
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct OldStableTreasury {
-    stable_token: UnorderedMap<AccountId, OldAssetInfo>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -296,19 +275,6 @@ impl StableTreasury {
         self.assert_asset(asset_id);
         let asset_info = self.assets.get(asset_id).unwrap();
         asset_info.commission_rate
-    }
-
-    pub fn from_old<S>(old_treasury: &mut OldStableTreasury, prefix: S) -> Self
-    where
-        S: IntoStorageKey,
-    {
-        let old_assets = old_treasury.stable_token.to_vec();
-        old_treasury.stable_token.clear();
-        let mut new_assets = UnorderedMap::new(prefix);
-        for (asset_id, old_asset_info) in old_assets.iter() {
-            new_assets.insert(&asset_id.clone(), &copy_asset_info(old_asset_info));
-        }
-        StableTreasury { assets: new_assets }
     }
 }
 

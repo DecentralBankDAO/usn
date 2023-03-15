@@ -18,7 +18,14 @@ impl Prices {
     }
 
     pub fn get_unwrap(&self, token_id: &TokenId) -> &Price {
-        self.prices.get(token_id).expect("Asset price is missing")
+        if is_usn(token_id) {
+            &Price {
+                multiplier: 10000, // 1:1
+                decimals: 22,
+            }
+        } else {
+            self.prices.get(token_id).expect("Asset price is missing")
+        }
     }
 }
 

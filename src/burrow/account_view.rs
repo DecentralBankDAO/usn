@@ -106,9 +106,9 @@ impl Burrow {
             .any(|farm_id| self.asset_farms.contains_key(&farm_id));
         AccountDetailedView {
             account_id: account.account_id,
-            supplied: self.asset_view(account.supplied),
-            collateral: self.asset_view(account.collateral),
-            borrowed: self.asset_view(account.borrowed),
+            supplied: self.assets_to_asset_view(account.supplied),
+            collateral: self.assets_to_asset_view(account.collateral),
+            borrowed: self.assets_to_asset_view(account.borrowed),
             farms,
             has_non_farmed_assets,
             booster_staking: account.booster_staking,
@@ -118,12 +118,14 @@ impl Burrow {
     fn get_asset_view(&self, token_id: TokenId, shares: Shares, is_borrowing: bool) -> AssetView {
         let asset = self.internal_unwrap_asset(&token_id);
         let apr = if is_borrowing {
-            asset.get_borrow_apr()
+            asset.get_borrow_apr(&token_id)
         } else {
-            asset.get_supply_apr()
+            asset.get_supply_apr(&token_id)
         };
         let balance = if is_borrowing {
-            asset.borrowed.shares_to_amount(shares, true)
+            let balance = asset.borrowed.shares_to_amount(shares, true);
+            let interest = self.calculate_usn_interest(balance);
+            balance + interest
         } else {
             asset.supplied.shares_to_amount(shares, false)
         };
@@ -136,7 +138,7 @@ impl Burrow {
         }
     }
 
-    fn asset_view(&self, assets: HashMap<AccountId, U128>) -> Vec<AssetView> {
+    fn assets_to_asset_view(&self, assets: HashMap<AccountId, U128>) -> Vec<AssetView> {
         assets
             .into_iter()
             .map(|(token_id, shares)| self.get_asset_view(token_id, shares, false))

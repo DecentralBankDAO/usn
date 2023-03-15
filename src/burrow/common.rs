@@ -47,3 +47,11 @@ pub mod u64_dec_format {
 pub fn to_nano(ts: u32) -> Timestamp {
     Timestamp::from(ts) * 10u64.pow(9)
 }
+
+pub fn is_usn(token_id: &TokenId) -> bool {
+    token_id == &env::current_account_id()
+}
+
+pub fn usn_id() -> TokenId {
+    env::current_account_id()
+}

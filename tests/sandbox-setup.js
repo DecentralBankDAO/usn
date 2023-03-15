@@ -7,6 +7,9 @@ const portUsed = require('port-used');
 process.env.NEAR_NO_LOGS = 'defined';
 
 const port = process.env.SANDBOX_PORT || 3030;
+const ONE_YOCTO = '1';
+const GAS_FOR_CALL = '200000000000000'; // 200 TGas
+const ONE_NEAR = '1000000000000000000000000';
 
 const config = {
   networkId: 'sandbox',
@@ -22,8 +25,9 @@ const config = {
   poolPath: './tests/staking_pool.wasm',
   priceoraclePath: './tests/price_oracle.wasm',
   priceoracleNearMultiplier: '111439',
-  priceoracleWbtcMultiplier: '200340075',
+  priceoracleWbtcMultiplier: '16338625',
   priceoracleWethMultiplier: '14844600',
+  priceoracleUsnMultiplier: '10000',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
   masterId: 'test.near',
   usnId: 'usn.test.near',
@@ -53,6 +57,9 @@ const usnMethods = {
     'guardians',
     'blacklist_status',
     'commission_rate',
+    'get_assets',
+    'get_asset',
+    'get_account',
   ],
   changeMethods: [
     'new',
@@ -81,9 +88,6 @@ const usnMethods = {
     'add_stable_asset',
     'mint_by_near',
     'add_asset',
-    'get_assets',
-    'get_asset',
-    'get_account',
     'storage_deposit',
     'execute',
   ],
@@ -189,6 +193,92 @@ async function sandboxSetup() {
   );
   await usnContract.new({ args: { owner_id: config.usnId } });
 
+  // Add USN to list of accepted tokens
+  await usnContract.add_asset({
+    args: {
+      token_id: config.usnId,
+      asset_config: {
+        reserve_ratio: 10000,
+        target_utilization: 8000,
+        target_utilization_rate: "1000000000000550000000000000",
+        max_utilization_rate: "1000000000000780000000000000",
+        // Value doesn't take part in compound calculation, still it should be 100%
+        // As to calculation restriction it couldn't be 100%, it's 99.99%
+        volatility_ratio: 9999,
+        extra_decimals: 0,
+        can_deposit: false,
+        can_withdraw: true,
+        can_use_as_collateral: false,
+        can_borrow: true,
+        net_tvl_multiplier: 10000,
+      },
+    },
+    amount: ONE_YOCTO,
+    gas: GAS_FOR_CALL,
+  });
+
+  // Add Weth to list of accepted tokens
+  await usnContract.add_asset({
+    args: {
+      token_id: config.wethId,
+      asset_config: {
+        reserve_ratio: 2500,
+        target_utilization: 8000,
+        target_utilization_rate: "1000000000003593629036885046",
+        max_utilization_rate: "1000000000039724853136740579",
+        volatility_ratio: 6000,
+        extra_decimals: 0,
+        can_deposit: true,
+        can_withdraw: true,
+        can_use_as_collateral: true,
+        can_borrow: true,
+        net_tvl_multiplier: 10000,
+      },
+    },
+    amount: ONE_YOCTO,
+    gas: GAS_FOR_CALL,
+  });
+
+  // Add Wbtc to list of accepted tokens
+  await usnContract.add_asset({
+    args: {
+      token_id: config.wbtcId,
+      asset_config: {
+        reserve_ratio: 2500,
+        target_utilization: 8000,
+        target_utilization_rate: "1000000000003593629036885046",
+        max_utilization_rate: "1000000000039724853136740579",
+        volatility_ratio: 6000,
+        extra_decimals: 0,
+        can_deposit: true,
+        can_withdraw: true,
+        can_use_as_collateral: true,
+        can_borrow: true,
+        net_tvl_multiplier: 10000,
+      },
+    },
+    amount: ONE_YOCTO,
+    gas: GAS_FOR_CALL,
+  });
+
+  // Register USN account 
+  await usnContract.storage_deposit({
+    args: {
+      account_id: config.usnId
+    },
+    amount: ONE_NEAR,
+    gas: GAS_FOR_CALL,
+  });
+
+  // Register Alice account 
+  await usnContract.storage_deposit({
+    args: {
+      account_id: config.aliceId
+    },
+    amount: ONE_NEAR,
+    gas: GAS_FOR_CALL,
+  });
+
   // Deploy USDT contract.
   const wasmUsdt = await fs.readFile(config.usdtPath);
   const usdtAccount = new nearAPI.Account(near.connection, config.usdtId);
@@ -254,7 +344,7 @@ async function sandboxSetup() {
     args: { account_id: config.usnId, amount: '0' },
   });
   await wethContract.mint({
-    args: { account_id: config.aliceId, amount: '100000000000000000000000' },
+    args: { account_id: config.aliceId, amount: '10000000000000000000000000' },
   });
 
   // Deploy WBTC contract.
@@ -378,6 +468,10 @@ async function sandboxSetup() {
     args: { asset_id: config.wbtcId },
     amount: '1',
   });
+  await oracleContract.add_asset({
+    args: { asset_id: config.usnId },
+    amount: '1',
+  });
   await oracleContract.report_prices({
     args: {
       prices: [
@@ -392,6 +486,10 @@ async function sandboxSetup() {
         {
           asset_id: config.wbtcId,
           price: { multiplier: config.priceoracleWbtcMultiplier, decimals: 12 },
+        },
+        {
+          asset_id: config.usnId,
+          price: { multiplier: config.priceoracleUsnMultiplier, decimals: 22 },
         },
       ],
     },
@@ -446,6 +544,11 @@ async function sandboxSetup() {
     config.usnId,
     usnMethods
   );
+  const carolOracle = new nearAPI.Contract(
+    carolAccount,
+    config.oracleId,
+    oracleMethods
+  );
 
   // Setup a global test context.
   global.usnAccount = usnAccount;
@@ -467,6 +570,7 @@ async function sandboxSetup() {
   global.carolContract = carolContract;
   global.carolUsdt = carolUsdt;
   global.usnRef = usnRef;
+  global.carolOracle = carolOracle;
 }
 
 async function sandboxTeardown() {

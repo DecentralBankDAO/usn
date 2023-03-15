@@ -133,7 +133,7 @@ impl Burrow {
             .unwrap_or_else(|| AssetFarm {
                 block_timestamp: env::block_timestamp(),
                 rewards: HashMap::new(),
-                inactive_rewards: LookupMap::new(StorageKey::InactiveAssetFarmRewards {
+                inactive_rewards: LookupMap::new(StorageKey::BurrowInactiveAssetFarmRewards {
                     farm_id: farm_id.clone(),
                 }),
             });

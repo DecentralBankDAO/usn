@@ -108,14 +108,14 @@ impl Account {
         *self
             .collateral
             .get(&token_id)
-            .expect("Collateral asset not found")
+            .expect(&format!("Collateral asset {} not found", token_id))
     }
 
-    pub fn internal_unwrap_borrowed(&mut self, token_id: &TokenId) -> Shares {
+    pub fn internal_unwrap_borrowed(&self, token_id: &TokenId) -> Shares {
         *self
             .borrowed
             .get(&token_id)
-            .expect("Borrowed asset not found")
+            .expect(&format!("Borrowed asset {} not found", token_id))
     }
 
     pub fn add_affected_farm(&mut self, farm_id: FarmId) -> bool {
@@ -170,7 +170,7 @@ impl Burrow {
 
     pub fn internal_unwrap_account(&self, account_id: &AccountId) -> Account {
         self.internal_get_account(account_id)
-            .expect("Account is not registered")
+            .expect(&format!("Account {} is not registered", account_id))
     }
 
     pub fn internal_set_account(&mut self, account_id: &AccountId, mut account: Account) {

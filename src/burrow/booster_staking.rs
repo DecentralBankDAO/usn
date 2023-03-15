@@ -144,5 +144,6 @@ fn compute_x_booster_amount(config: &Config, amount: u128, duration_ns: Duration
             u128::from(to_nano(
                 config.maximum_staking_duration_sec - config.minimum_staking_duration_sec,
             )) * u128::from(MIN_BOOSTER_MULTIPLIER),
+            false,
         )
 }

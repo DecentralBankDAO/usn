@@ -81,11 +81,16 @@ impl AssetConfig {
         &self,
         borrowed_balance: Balance,
         total_supplied_balance: Balance,
+        token_id: &TokenId,
     ) -> BigDecimal {
         if total_supplied_balance == 0 {
             BigDecimal::one()
         } else {
-            let pos = BigDecimal::from(borrowed_balance).div_u128(total_supplied_balance);
+            let pos = if is_usn(token_id) {
+                BigDecimal::one()
+            } else {
+                BigDecimal::from(borrowed_balance).div_u128(total_supplied_balance)
+            };
             let target_utilization = BigDecimal::from_ratio(self.target_utilization);
             if pos < target_utilization {
                 BigDecimal::one()
@@ -127,7 +132,11 @@ mod tests {
     #[test]
     fn test_get_rate_and_apr() {
         let config = test_config();
-        let rate = config.get_rate(81 * ONE_NEAR, 100 * ONE_NEAR);
+        let rate = config.get_rate(
+            81 * ONE_NEAR,
+            100 * ONE_NEAR,
+            &"alice.near".parse().unwrap(),
+        );
         println!("Rate: {}", rate);
 
         let apr = rate.pow(MS_PER_YEAR) - BigDecimal::one();

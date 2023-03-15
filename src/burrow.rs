@@ -70,12 +70,12 @@ impl Burrow {
     pub fn new(config: Config) -> Self {
         config.assert_valid();
         Self {
-            accounts: UnorderedMap::new(StorageKey::Accounts),
-            storage: LookupMap::new(StorageKey::Storage),
-            assets: LookupMap::new(StorageKey::Assets),
-            asset_farms: LookupMap::new(StorageKey::AssetFarms),
-            asset_ids: UnorderedSet::new(StorageKey::AssetIds),
-            config: LazyOption::new(StorageKey::Config, Some(&config)),
+            accounts: UnorderedMap::new(StorageKey::BurrowAccounts),
+            storage: LookupMap::new(StorageKey::BurrowStorage),
+            assets: LookupMap::new(StorageKey::BurrowAssets),
+            asset_farms: LookupMap::new(StorageKey::BurrowAssetFarms),
+            asset_ids: UnorderedSet::new(StorageKey::BurrowAssetIds),
+            config: LazyOption::new(StorageKey::BurrowConfig, Some(&config)),
             last_prices: HashMap::new(),
         }
     }
@@ -92,7 +92,8 @@ impl OraclePriceReceiver for Contract {
     /// - Requires to be called by the oracle account ID.
     fn oracle_on_call(&mut self, sender_id: AccountId, data: PriceData, msg: String) {
         assert_eq!(env::predecessor_account_id(), CONFIG.oracle_address());
-        self.burrow.oracle_on_call(sender_id, data, msg);
+        self.burrow
+            .oracle_on_call(sender_id, data, msg, &mut self.token, &self.guardians);
     }
 }
 
@@ -124,7 +125,9 @@ impl Contract {
     /// Claims all unclaimed farm rewards and starts farming new farms.
     /// If the account_id is given, then it claims farms for the given account_id or uses
     /// predecessor_account_id otherwise.
-    pub fn account_farm_claim_all(&mut self, account_id: Option<AccountId>) {
+    #[private]
+    #[allow(unused)]
+    fn account_farm_claim_all(&mut self, account_id: Option<AccountId>) {
         self.burrow.account_farm_claim_all(account_id);
     }
 
@@ -152,21 +155,27 @@ impl Contract {
     #[payable]
     pub fn execute(&mut self, actions: Vec<Action>) {
         assert_one_yocto();
-        self.burrow.execute(actions)
+        self.burrow.execute(actions, &mut self.token)
     }
 
     /// Returns an asset farm for a given farm ID.
-    pub fn get_asset_farm(&self, farm_id: FarmId) -> Option<AssetFarm> {
+    #[private]
+    #[allow(unused)]
+    fn get_asset_farm(&self, farm_id: FarmId) -> Option<AssetFarm> {
         self.burrow.get_asset_farm(farm_id)
     }
 
     /// Returns a list of pairs (farm ID, asset farm) for a given list of farm IDs.
-    pub fn get_asset_farms(&self, farm_ids: Vec<FarmId>) -> Vec<(FarmId, AssetFarm)> {
+    #[private]
+    #[allow(unused)]
+    fn get_asset_farms(&self, farm_ids: Vec<FarmId>) -> Vec<(FarmId, AssetFarm)> {
         self.burrow.get_asset_farms(farm_ids)
     }
 
     /// Returns full list of pairs (farm ID, asset farm).
-    pub fn get_asset_farms_all(&self) -> Vec<(FarmId, AssetFarm)> {
+    #[private]
+    #[allow(unused)]
+    fn get_asset_farms_all(&self) -> Vec<(FarmId, AssetFarm)> {
         self.burrow.get_asset_farms_all()
     }
 
@@ -202,15 +211,19 @@ impl Contract {
     /// If the previous stake exists, then the new duration should be longer than the previous
     /// remaining staking duration.
     /// Currently is private
+    #[private]
     #[payable]
-    pub fn account_stake_booster(&mut self, amount: Option<U128>, duration: DurationSec) {
+    #[allow(unused)]
+    fn account_stake_booster(&mut self, amount: Option<U128>, duration: DurationSec) {
         self.assert_owner();
         assert_one_yocto();
         self.burrow.account_stake_booster(amount, duration)
     }
 
+    #[private]
     #[payable]
-    pub fn account_unstake_booster(&mut self) {
+    #[allow(unused)]
+    fn account_unstake_booster(&mut self) {
         self.assert_owner();
         assert_one_yocto();
         self.burrow.account_unstake_booster()
@@ -265,8 +278,10 @@ impl Contract {
     /// - Panics if an asset with the given token_id doesn't have enough reserved balance.
     /// - Requires one yoctoNEAR.
     /// - Requires to be called by the contract owner.
+    #[private]
     #[payable]
-    pub fn add_asset_farm_reward(
+    #[allow(unused)]
+    fn add_asset_farm_reward(
         &mut self,
         farm_id: FarmId,
         reward_token_id: AccountId,

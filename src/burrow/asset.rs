@@ -55,22 +55,25 @@ impl Asset {
         }
     }
 
-    pub fn get_rate(&self) -> BigDecimal {
-        self.config
-            .get_rate(self.borrowed.balance, self.supplied.balance + self.reserved)
+    pub fn get_rate(&self, token_id: &TokenId) -> BigDecimal {
+        self.config.get_rate(
+            self.borrowed.balance,
+            self.supplied.balance + self.reserved,
+            token_id,
+        )
     }
 
-    pub fn get_borrow_apr(&self) -> BigDecimal {
-        let rate = self.get_rate();
+    pub fn get_borrow_apr(&self, token_id: &TokenId) -> BigDecimal {
+        let rate = self.get_rate(token_id);
         rate.pow(MS_PER_YEAR) - BigDecimal::one()
     }
 
-    pub fn get_supply_apr(&self) -> BigDecimal {
+    pub fn get_supply_apr(&self, token_id: &TokenId) -> BigDecimal {
         if self.supplied.balance == 0 || self.borrowed.balance == 0 {
             return BigDecimal::zero();
         }
 
-        let borrow_apr = self.get_borrow_apr();
+        let borrow_apr = self.get_borrow_apr(token_id);
         if borrow_apr == BigDecimal::zero() {
             return borrow_apr;
         }
@@ -91,28 +94,37 @@ impl Asset {
     // r / n = (x ** (1 / n)) - 1
     // r = n * ((x ** (1 / n)) - 1)
     // n = in millis
-    fn compound(&mut self, time_diff_ms: Duration) {
-        let rate = self.get_rate();
+    fn compound(&mut self, time_diff_ms: Duration, token_id: &TokenId) {
+        let rate = self.get_rate(token_id);
         let interest =
             rate.pow(time_diff_ms).round_mul_u128(self.borrowed.balance) - self.borrowed.balance;
         // TODO: Split interest based on ratio between reserved and supplied?
         let reserved = ratio(interest, self.config.reserve_ratio);
+
+        if is_usn(token_id) {
+            self.supplied.usn_interest += interest - reserved;
+            self.reserved += reserved;
+            self.borrowed.usn_interest += interest;
+            return;
+        }
+
         if self.supplied.shares.0 > 0 {
             self.supplied.balance += interest - reserved;
             self.reserved += reserved;
         } else {
             self.reserved += interest;
         }
+
         self.borrowed.balance += interest;
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, token_id: &TokenId) {
         let timestamp = env::block_timestamp();
         let time_diff_ms = nano_to_ms(timestamp - self.last_update_timestamp);
         if time_diff_ms > 0 {
             // update
             self.last_update_timestamp += ms_to_nano(time_diff_ms);
-            self.compound(time_diff_ms);
+            self.compound(time_diff_ms, token_id);
         }
     }
 
@@ -131,7 +143,7 @@ impl Burrow {
         cache.get(token_id).cloned().unwrap_or_else(|| {
             let asset = self.assets.get(token_id).map(|o| {
                 let mut asset: Asset = o.into();
-                asset.update();
+                asset.update(token_id);
                 asset
             });
             cache.insert(token_id.clone(), asset.clone());
@@ -186,7 +198,7 @@ impl Burrow {
             .map(|index| {
                 let key = keys.get(index).unwrap();
                 let mut asset: Asset = self.assets.get(&key).unwrap().into();
-                asset.update();
+                asset.update(&key);
                 (key, asset)
             })
             .collect()
@@ -204,7 +216,7 @@ impl Burrow {
             .map(|index| {
                 let token_id = keys.get(index).unwrap();
                 let mut asset: Asset = self.assets.get(&token_id).unwrap().into();
-                asset.update();
+                asset.update(&token_id);
                 self.asset_into_detailed_view(token_id, asset)
             })
             .collect()

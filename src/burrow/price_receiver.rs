@@ -27,14 +27,30 @@ impl Burrow {
         );
     }
 
-    pub fn oracle_on_call(&mut self, sender_id: AccountId, data: PriceData, msg: String) {
+    pub fn oracle_on_call(
+        &mut self,
+        sender_id: AccountId,
+        data: PriceData,
+        msg: String,
+        token: &mut FungibleTokenFreeStorage,
+        guardians: &UnorderedSet<AccountId>,
+    ) {
         let actions = match serde_json::from_str(&msg).expect("Can't parse PriceReceiverMsg") {
             PriceReceiverMsg::Execute { actions } => actions,
         };
 
-        let mut account = self.internal_unwrap_account(&sender_id);
+        let account_id = if guardians.contains(&sender_id) {
+            assert_eq!(actions.len(), 1);
+            match &actions[0] {
+                Action::Liquidate { .. } => usn_id(),
+                _ => env::panic_str("Only liquidation action can be done by guardian"),
+            }
+        } else {
+            sender_id
+        };
+        let mut account = self.internal_unwrap_account(&account_id);
         self.validate_price_data(&data);
-        self.internal_execute(&sender_id, &mut account, actions, data.into());
-        self.internal_set_account(&sender_id, account);
+        self.internal_execute(&account_id, &mut account, actions, data.into(), token);
+        self.internal_set_account(&account_id, account);
     }
 }

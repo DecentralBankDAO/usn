@@ -1,4 +1,5 @@
 #![deny(warnings)]
+mod burrow;
 mod event;
 mod ft;
 mod oracle;
@@ -8,6 +9,7 @@ mod staking;
 mod storage;
 mod treasury;
 
+use burrow::{Burrow, Config, FarmId};
 use near_contract_standards::fungible_token::core::FungibleTokenCore;
 use near_contract_standards::fungible_token::metadata::{
     FungibleTokenMetadata, FungibleTokenMetadataProvider, FT_METADATA_SPEC,
@@ -48,8 +50,14 @@ enum StorageKey {
     Token,
     TokenMetadata,
     Blacklist,
-    _TreasuryData,
     StableTreasury,
+    Accounts,
+    Storage,
+    Assets,
+    AssetFarms,
+    InactiveAssetFarmRewards { farm_id: FarmId },
+    AssetIds,
+    Config,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -154,6 +162,7 @@ pub struct Contract {
     commission: CommissionV1,
     stable_treasury: StableTreasury,
     oracle: Oracle,
+    burrow: Burrow,
 }
 
 const DATA_IMAGE_SVG_NEAR_ICON: &str =
@@ -263,6 +272,7 @@ impl Contract {
             commission: CommissionV1::default(),
             stable_treasury: StableTreasury::new(StorageKey::StableTreasury),
             oracle: Oracle::default(),
+            burrow: Burrow::new(Config::default()),
         };
 
         this
@@ -469,6 +479,7 @@ impl Contract {
         }
 
         let mut prev: PrevContract = env::state_read().expect("Contract is not initialized");
+        let config = Config::default();
 
         Self {
             owner_id: prev.owner_id,
@@ -484,6 +495,7 @@ impl Contract {
                 StorageKey::StableTreasury,
             ),
             oracle: prev.oracle,
+            burrow: Burrow::new(config),
         }
     }
 
@@ -613,15 +625,19 @@ impl FungibleTokenReceiver for Contract {
         self.abort_if_blacklisted(&sender_id);
 
         // Empty message is used for stable coin depositing.
-        assert!(msg.is_empty());
+        // Non empty is used for burrow functionality
 
-        let token_id = env::predecessor_account_id();
+        if msg.is_empty() {
+            let token_id = env::predecessor_account_id();
 
-        self.stable_treasury
-            .deposit(&mut self.token, &sender_id, &token_id, amount.into());
+            self.stable_treasury
+                .deposit(&mut self.token, &sender_id, &token_id, amount.into());
 
-        // Unused tokens: 0.
-        PromiseOrValue::Value(U128(0))
+            // Unused tokens: 0.
+            PromiseOrValue::Value(U128(0))
+        } else {
+            self.burrow.ft_on_transfer(sender_id, amount, msg)
+        }
     }
 }
 

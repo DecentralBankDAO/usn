@@ -16,16 +16,23 @@ const config = {
   usnPath: './target/wasm32-unknown-unknown/sandbox/usn.wasm',
   usdtPath: './tests/test_token.wasm',
   usdcPath: './tests/test_token.wasm',
+  wbtcPath: './tests/test_token.wasm',
+  wethPath: './tests/test_token.wasm',
   refPath: './tests/ref_exchange.wasm',
   poolPath: './tests/staking_pool.wasm',
   priceoraclePath: './tests/price_oracle.wasm',
-  priceoracleMultiplier: '111439',
+  priceoracleNearMultiplier: '111439',
+  priceoracleWbtcMultiplier: '200340075',
+  priceoracleWethMultiplier: '14844600',
   amount: new BN('300000000000000000000000000', 10), // 26 digits, 300 NEAR
   masterId: 'test.near',
   usnId: 'usn.test.near',
   usdtId: 'usdt.test.near',
   usdcId: 'usdc.test.near',
+  wethId: 'weth.test.near',
+  wbtcId: 'wbtc.test.near',
   refId: 'ref.test.near',
+  oracleId: 'priceoracle.test.near',
   poolId: 'pool.test.near',
   oracleId: 'priceoracle.test.near',
   aliceId: 'alice.test.near',
@@ -73,15 +80,16 @@ const usnMethods = {
     'transfer_commission',
     'add_stable_asset',
     'mint_by_near',
+    'add_asset',
+    'get_assets',
+    'get_asset',
+    'get_account',
+    'storage_deposit',
+    'execute',
   ],
 };
 
-const usdtMethods = {
-  viewMethods: ['ft_balance_of'],
-  changeMethods: ['new', 'mint', 'ft_transfer', 'ft_transfer_call'],
-};
-
-const usdcMethods = {
+const tokenMethods = {
   viewMethods: ['ft_balance_of'],
   changeMethods: ['new', 'mint', 'ft_transfer', 'ft_transfer_call'],
 };
@@ -110,6 +118,7 @@ const oracleMethods = {
     'add_asset_ema',
     'add_oracle',
     'report_prices',
+    'oracle_call'
   ],
 };
 
@@ -149,6 +158,8 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.usnId, pubKey, config.amount);
   await masterAccount.createAccount(config.usdtId, pubKey, config.amount);
   await masterAccount.createAccount(config.usdcId, pubKey, config.amount);
+  await masterAccount.createAccount(config.wethId, pubKey, config.amount);
+  await masterAccount.createAccount(config.wbtcId, pubKey, config.amount);
   await masterAccount.createAccount(config.refId, pubKey, config.amount);
   await masterAccount.createAccount(config.poolId, pubKey, config.amount);
   await masterAccount.createAccount(config.oracleId, pubKey, config.amount);
@@ -156,6 +167,8 @@ async function sandboxSetup() {
   await masterAccount.createAccount(config.carolId, pubKey, config.amount);
   keyStore.setKey(config.networkId, config.usnId, privKey);
   keyStore.setKey(config.networkId, config.usdtId, privKey);
+  keyStore.setKey(config.networkId, config.wethId, privKey);
+  keyStore.setKey(config.networkId, config.wbtcId, privKey);
   keyStore.setKey(config.networkId, config.usdcId, privKey);
   keyStore.setKey(config.networkId, config.refId, privKey);
   keyStore.setKey(config.networkId, config.poolId, privKey);
@@ -185,7 +198,7 @@ async function sandboxSetup() {
   const usdtContract = new nearAPI.Contract(
     usdtAccount,
     config.usdtId,
-    usdtMethods
+    tokenMethods
   );
   await usdtContract.new({ args: {} });
   // Register accounts in USDT contract to enable depositing.
@@ -211,7 +224,7 @@ async function sandboxSetup() {
   const usdcContract = new nearAPI.Contract(
     usdcAccount,
     config.usdcId,
-    usdcMethods
+    tokenMethods
   );
   await usdcContract.new({ args: {} });
   // Register accounts in USDC contract to enable depositing.
@@ -223,6 +236,44 @@ async function sandboxSetup() {
   });
   await usdcContract.mint({
     args: { account_id: config.aliceId, amount: '0' },
+  });
+
+  // Deploy WETH contract.
+  const wasmWeth = await fs.readFile(config.wethPath);
+  const wethAccount = new nearAPI.Account(near.connection, config.wethId);
+  await wethAccount.deployContract(wasmWeth);
+
+  // Initialize WETH contract.
+  const wethContract = new nearAPI.Contract(
+    wethAccount,
+    config.wethId,
+    tokenMethods
+  );
+  await wethContract.new({ args: {} });
+  await wethContract.mint({
+    args: { account_id: config.usnId, amount: '0' },
+  });
+  await wethContract.mint({
+    args: { account_id: config.aliceId, amount: '100000000000000000000000' },
+  });
+
+  // Deploy WBTC contract.
+  const wasmWbtc = await fs.readFile(config.wbtcPath);
+  const wbtcAccount = new nearAPI.Account(near.connection, config.wbtcId);
+  await wbtcAccount.deployContract(wasmWbtc);
+
+  // Initialize WBTC contract.
+  const wbtcContract = new nearAPI.Contract(
+    wbtcAccount,
+    config.wbtcId,
+    tokenMethods
+  );
+  await wbtcContract.new({ args: {} });
+  await wbtcContract.mint({
+    args: { account_id: config.usnId, amount: '0' },
+  });
+  await wbtcContract.mint({
+    args: { account_id: config.aliceId, amount: '100000000000000000' },
   });
 
   // Deploy Staking Pool contract.
@@ -302,7 +353,7 @@ async function sandboxSetup() {
   );
   await oracleContract.new({
     args: {
-      recency_duration_sec: 360,
+      recency_duration_sec: 3600,
       owner_id: config.oracleId,
       near_claim_amount: '0',
     },
@@ -319,12 +370,28 @@ async function sandboxSetup() {
     args: { asset_id: 'wrap.test.near', period_sec: 3600 },
     amount: '1',
   });
+  await oracleContract.add_asset({
+    args: { asset_id: config.wethId },
+    amount: '1',
+  });
+  await oracleContract.add_asset({
+    args: { asset_id: config.wbtcId },
+    amount: '1',
+  });
   await oracleContract.report_prices({
     args: {
       prices: [
         {
-          asset_id: 'wrap.test.near',
-          price: { multiplier: config.priceoracleMultiplier, decimals: 28 },
+          asset_id: "wrap.test.near",
+          price: { multiplier: config.priceoracleNearMultiplier, decimals: 28 },
+        },
+        {
+          asset_id: config.wethId,
+          price: { multiplier: config.priceoracleWethMultiplier, decimals: 22 },
+        },
+        {
+          asset_id: config.wbtcId,
+          price: { multiplier: config.priceoracleWbtcMultiplier, decimals: 12 },
         },
       ],
     },
@@ -337,23 +404,42 @@ async function sandboxSetup() {
     config.usnId,
     usnMethods
   );
+
   const aliceUsdt = new nearAPI.Contract(
     aliceAccount,
     config.usdtId,
-    usdtMethods
+    tokenMethods
   );
 
   const aliceUsdc = new nearAPI.Contract(
     aliceAccount,
     config.usdcId,
-    usdcMethods
+    tokenMethods
+  );
+
+  const aliceWeth = new nearAPI.Contract(
+    aliceAccount,
+    config.wethId,
+    tokenMethods
+  );
+
+  const aliceWbtc = new nearAPI.Contract(
+    aliceAccount,
+    config.wbtcId,
+    tokenMethods
+  );
+
+  const aliceOracle = new nearAPI.Contract(
+    aliceAccount,
+    config.oracleId,
+    oracleMethods
   );
 
   const carolAccount = new nearAPI.Account(near.connection, config.carolId);
   const carolUsdt = new nearAPI.Contract(
     carolAccount,
     config.usdtId,
-    usdtMethods
+    tokenMethods
   );
   const carolContract = new nearAPI.Contract(
     carolAccount,
@@ -368,9 +454,15 @@ async function sandboxSetup() {
   global.usdcContract = usdcContract;
   global.refContract = refContract;
   global.poolContract = poolContract;
+  global.wethContract = wethContract;
+  global.wbtcContract = wbtcContract;
+  global.oracleContract = oracleContract;
   global.aliceAccount = aliceAccount;
   global.aliceUsdt = aliceUsdt;
   global.aliceUsdc = aliceUsdc;
+  global.aliceWeth = aliceWeth;
+  global.aliceWbtc = aliceWbtc;
+  global.aliceOracle = aliceOracle;
   global.aliceContract = aliceContract;
   global.carolContract = carolContract;
   global.carolUsdt = carolUsdt;
@@ -391,7 +483,7 @@ module.exports = { config, sandboxSetup, sandboxTeardown };
 
 module.exports.mochaHooks = {
   beforeAll: async function () {
-    this.timeout(80000);
+    this.timeout(120000);
     await sandboxSetup();
   },
   afterAll: async function () {

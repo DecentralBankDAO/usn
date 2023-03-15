@@ -1366,3 +1366,417 @@ describe('Staking Pool', async function () {
     );
   });
 });
+
+describe('Burrow', async function () {
+  this.timeout(20000);
+
+  before(async () => {
+    // Add Weth to list of accepted tokens
+    await global.usnContract.add_asset({
+      args: {
+        token_id: config.wethId,
+        asset_config: {
+          reserve_ratio: 2500,
+          target_utilization: 8000,
+          target_utilization_rate: "1000000000003593629036885046",
+          max_utilization_rate: "1000000000039724853136740579",
+          volatility_ratio: 6000,
+          extra_decimals: 0,
+          can_deposit: true,
+          can_withdraw: true,
+          can_use_as_collateral: true,
+          can_borrow: true,
+          net_tvl_multiplier: 10000,
+        },
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Add Wbtc to list of accepted tokens
+    await global.usnContract.add_asset({
+      args: {
+        token_id: config.wbtcId,
+        asset_config: {
+          reserve_ratio: 2500,
+          target_utilization: 8000,
+          target_utilization_rate: "1000000000003593629036885046",
+          max_utilization_rate: "1000000000039724853136740579",
+          volatility_ratio: 6000,
+          extra_decimals: 0,
+          can_deposit: true,
+          can_withdraw: true,
+          can_use_as_collateral: true,
+          can_borrow: true,
+          net_tvl_multiplier: 10000,
+        },
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    // Register Alice account 
+    await global.aliceContract.storage_deposit({
+      args: {},
+      amount: ONE_NEAR,
+      gas: GAS_FOR_CALL,
+    });
+  });
+
+  it('should be able to deposit asset to reserve', async () => {
+    const aliceWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const amount = '100000000';
+
+    // Alice supplies Weth
+    await global.aliceWeth.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: amount,
+        msg: '\"DepositToReserve\"',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const asset = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+
+    assert.equal(asset.reserved, amount);
+    assert.equal(new BN(aliceWethBefore).sub(new BN(aliceWethAfter)).toString(), amount);
+    assert.equal(new BN(usnWethAfter).sub(new BN(usnWethBefore)).toString(), amount);
+  });
+
+  it('should be able to supply asset', async () => {
+    const aliceWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const amount = '1000000';
+
+    // Alice supplies Weth
+    await global.aliceWeth.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: amount,
+        msg: '\"Supply\"',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const asset = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const account = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(asset.supplied.balance, amount);
+    assert.equal(account.supplied[0].balance, amount);
+    assert.equal(account.supplied[0].token_id, config.wethId);
+    assert.equal(new BN(aliceWethBefore).sub(new BN(aliceWethAfter)).toString(), amount);
+    assert.equal(new BN(usnWethAfter).sub(new BN(usnWethBefore)).toString(), amount);
+  });
+
+  it('should be able to supply asset as collateral', async () => {
+    const aliceWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountBefore = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+    const amount = '1000000';
+    const msg = '{\"Execute\": {\"actions\": [{\"IncreaseCollateral\": {\"token_id\": \"weth.test.near\", \"max_amount\":\"1000000\"}}]}}';
+
+    // Alice supplies Weth as collateral
+    await global.aliceWeth.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: amount,
+        msg: msg,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountAfter = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(new BN(assetAfter.supplied.balance).sub(new BN(assetBefore.supplied.balance)).toString(), amount);
+    assert.deepEqual(accountBefore.supplied, accountAfter.supplied);
+    assert.equal(accountAfter.collateral[0].balance, amount);
+    assert.equal(accountAfter.collateral[0].token_id, config.wethId);
+    assert.equal(new BN(aliceWethBefore).sub(new BN(aliceWethAfter)).toString(), amount);
+    assert.equal(new BN(usnWethAfter).sub(new BN(usnWethBefore)).toString(), amount);
+  });
+
+  it('should be able to increase collateral', async () => {
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountBefore = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+    const amount = '1000000';
+    const msg = '{\"Execute\": {\"actions\": [{\"IncreaseCollateral\": {\"token_id\": \"weth.test.near\", \"max_amount\":\"1000000\"}}]}}';
+
+    // Alice increases collateral
+    await global.aliceOracle.oracle_call({
+      args: {
+        receiver_id: config.usnId,
+        msg: msg,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountAfter = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(assetAfter.supplied.balance, assetBefore.supplied.balance);
+    assert.equal(accountAfter.supplied.length, 0);
+    assert.equal(new BN(accountAfter.collateral[0].balance)
+      .sub(new BN(accountBefore.collateral[0].balance)).toString(),
+      amount);
+    assert.equal(accountAfter.collateral[0].token_id, config.wethId);
+  });
+
+  it('should be able to decrease collateral', async () => {
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountBefore = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+    const amount = '1000000';
+    const msg = '{\"Execute\": {\"actions\": [{\"DecreaseCollateral\": {\"token_id\": \"weth.test.near\", \"max_amount\":\"1000000\"}}]}}';
+
+    // Alice decreases collateral
+    await global.aliceOracle.oracle_call({
+      args: {
+        receiver_id: config.usnId,
+        msg: msg,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountAfter = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(assetAfter.supplied.balance, assetBefore.supplied.balance);
+    assert.equal(accountAfter.supplied[0].balance, amount);
+    assert.equal(new BN(accountBefore.collateral[0].balance)
+      .sub(new BN(accountAfter.collateral[0].balance)).toString(),
+      amount);
+    assert.equal(accountAfter.collateral[0].token_id, config.wethId);
+  });
+
+  it('should be able to withdraw asset', async () => {
+    const aliceWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethBefore = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const amount = '1000000';
+
+    // Alice decreases collateral
+    await global.aliceContract.execute({
+      args: {
+        actions: [
+          {
+            "Withdraw": {
+              "token_id": config.wethId,
+              "max_amount": amount,
+            }
+          }
+        ]
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const aliceWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.aliceId,
+    });
+    const usnWethAfter = await global.wethContract.ft_balance_of({
+      account_id: config.usnId,
+    });
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const account = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(new BN(assetBefore.supplied.balance).sub(new BN(assetAfter.supplied.balance)).toString(), amount);
+    assert.equal(account.supplied.length, 0);
+    assert.equal(account.collateral[0].balance, amount);
+    assert.equal(account.collateral[0].token_id, config.wethId);
+    assert.equal(new BN(aliceWethAfter).sub(new BN(aliceWethBefore)).toString(), amount);
+    assert.equal(new BN(usnWethBefore).sub(new BN(usnWethAfter)).toString(), amount);
+  });
+
+  it('should be able to borrow', async () => {
+    const wbtcAmount = '100000000';
+
+    // Alice supplies Wbtc
+    await global.aliceWbtc.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: wbtcAmount,
+        msg: '\"Supply\"',
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const amountCollateral = '1000000';
+    const msgCollateral = '{\"Execute\": {\"actions\": [{\"IncreaseCollateral\": {\"token_id\": \"wbtc.test.near\", \"max_amount\":\"100000\"}}]}}';
+
+    // Alice supplies Weth as collateral
+    await global.aliceWeth.ft_transfer_call({
+      args: {
+        receiver_id: config.usnId,
+        amount: amountCollateral,
+        msg: msgCollateral,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountBefore = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+    const amount = '1000000';
+    const msg = '{\"Execute\": {\"actions\": [{\"Borrow\": {\"token_id\": \"weth.test.near\", \"amount\":\"1000000\"}}]}}';
+
+    // Alice borrows Weth
+    await global.aliceOracle.oracle_call({
+      args: {
+        receiver_id: config.usnId,
+        msg: msg,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountAfter = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(assetAfter.borrowed.balance, amount);
+    assert(assetAfter.borrow_apr > 0);
+    assert.equal(new BN(assetAfter.supplied.balance)
+      .sub(new BN(assetBefore.supplied.balance)).toString(),
+      amount);
+    assert(assetAfter.supply_apr > 0);
+
+    assert.equal(new BN(accountAfter.supplied[0].balance)
+      .sub(new BN(accountBefore.supplied[0].balance)).toString(),
+      amount);
+    assert.equal(accountAfter.collateral[0].token_id, config.wbtcId);
+    assert.equal(accountAfter.collateral[1].token_id, config.wethId);
+    assert(accountAfter.supplied[0].apr > 0);
+    assert.equal(accountAfter.borrowed[0].balance, amount);
+    assert.equal(accountAfter.borrowed[0].token_id, config.wethId);
+    assert(accountAfter.borrowed[0].apr > 0);
+  });
+
+  it('should be able to repay', async () => {
+    const assetBefore = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountBefore = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+    const amount = '1000000';
+    const msg = '{\"Execute\": {\"actions\": [{\"Repay\": {\"token_id\": \"weth.test.near\", \"max_amount\":\"1000000\"}}]}}';
+
+    // Alice supplies Weth as collateral
+    await global.aliceOracle.oracle_call({
+      args: {
+        receiver_id: config.usnId,
+        msg: msg,
+      },
+      amount: ONE_YOCTO,
+      gas: GAS_FOR_CALL,
+    });
+
+    const assetAfter = await global.usnContract.get_asset({
+      token_id: config.wethId,
+    });
+    const accountAfter = await global.usnContract.get_account({
+      account_id: config.aliceId,
+    });
+
+    assert.equal(new BN(assetBefore.supplied.balance).sub(new BN(assetAfter.supplied.balance)).toString(), amount);
+    assert.equal(assetAfter.borrowed.balance, '0');
+    assert.deepEqual(assetAfter.borrow_apr, '0.0');
+    assert.equal(new BN(assetBefore.supplied.balance)
+      .sub(new BN(assetAfter.supplied.balance)).toString(),
+      amount);
+    assert.equal(assetAfter.supply_apr, '0.0');
+
+    assert.equal(new BN(accountBefore.supplied[0].balance)
+      .sub(new BN(accountAfter.supplied[0].balance)).toString(),
+      amount);
+    assert.equal(accountAfter.collateral[0].token_id, config.wbtcId);
+    assert.equal(accountAfter.collateral[1].token_id, config.wethId);
+    assert.equal(accountAfter.borrowed.length, 0);
+  });
+});

@@ -1,23 +1,35 @@
 //! Interface to `priceoracle.near`.
 
-use near_sdk::{ext_contract, json_types::U64, Timestamp};
+use near_sdk::{ext_contract, Timestamp};
 
-use crate::*;
+use crate::{
+    burrow::{u128_dec_format, u64_dec_format},
+    *,
+};
+
+const MAX_VALID_DECIMALS: u8 = 77;
 
 // From https://github.com/NearDeFi/price-oracle/blob/main/src/*.rs
 type AssetId = String;
 type DurationSec = u32;
 
 // From https://github.com/NearDeFi/price-oracle/blob/main/src/utils.rs
-#[derive(BorshSerialize, BorshDeserialize, Deserialize, Clone, Copy)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Copy)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Price {
-    pub multiplier: U128,
+    #[serde(with = "u128_dec_format")]
+    pub multiplier: Balance,
     pub decimals: u8,
 }
 
+impl Price {
+    pub fn assert_valid(&self) {
+        assert!(self.decimals <= MAX_VALID_DECIMALS);
+    }
+}
+
 // From https://github.com/NearDeFi/price-oracle/blob/main/src/asset.rs
-#[derive(BorshSerialize, BorshDeserialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetOptionalPrice {
     pub asset_id: AssetId,
@@ -25,12 +37,14 @@ pub struct AssetOptionalPrice {
 }
 
 // From https://github.com/NearDeFi/price-oracle/blob/main/src/lib.rs
-#[derive(BorshSerialize, BorshDeserialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PriceData {
-    timestamp: U64,
-    recency_duration_sec: DurationSec,
-    prices: Vec<AssetOptionalPrice>,
+    #[serde(with = "u64_dec_format")]
+    pub timestamp: Timestamp,
+    pub recency_duration_sec: DurationSec,
+
+    pub prices: Vec<AssetOptionalPrice>,
 }
 
 impl PriceData {

@@ -3,13 +3,19 @@ use near_sdk::Timestamp;
 use crate::oracle::priceoracle::{ext_priceoracle, PriceData};
 use crate::*;
 
-struct OracleConfig {
+pub struct OracleConfig {
     oracle_address: &'static str,
     asset_id: &'static str,
     gas: Gas,
 }
 
-const CONFIG: OracleConfig = if cfg!(feature = "mainnet") {
+impl OracleConfig {
+    pub fn oracle_address(&self) -> AccountId {
+        self.oracle_address.parse().unwrap()
+    }
+}
+
+pub const CONFIG: OracleConfig = if cfg!(feature = "mainnet") {
     OracleConfig {
         oracle_address: "priceoracle.near",
         asset_id: "wrap.near", // NEARUSDT

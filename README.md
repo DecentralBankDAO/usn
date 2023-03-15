@@ -1,8 +1,15 @@
 [![USN](https://github.com/decentralbankdao/usn/actions/workflows/test.yaml/badge.svg?event=push)](https://github.com/decentralbankdao/usn)
 
-# USN
+# USN 3.0
 
-USN is a NEAR-native USD stable coin.
+USN is a NEAR-native stable coin.
+
+USN 3.0 extends USN 2.0 with CDP-fashioned logic (collaterized debt position) based on [BurrowLand](https://github.com/NearDeFi/burrowland/) algorithm.
+
+USN3.0 utilizes the BurrowLand core extending it with 2 actions:
+
+* `BorrowUsn`
+* `RepayUsn`
 
 The contract implements fungible token API according to the following standards:
 
@@ -14,23 +21,43 @@ The contract implements fungible token API according to the following standards:
 
 |         |                 |
 | ------- | --------------- |
-| Mainnet | `usn `          |
+| Mainnet | `usn`           |
 | Testnet | `usdn.testnet`  |
 | Sandbox | `usn.test.near` |
 
+Check the version:
+
+```bash
+near view usdn.testnet version
+```
+
 # How It Works
 
-## Obtain USN for USDT
+## USN 3.0
+
+![USN3.0 scheme](./images/usn3.0_burrow.jpg)
+
+### Mint USN: deposit a collateral and borrow USN
+
+Example: https://github.com/binary-star-near/usn/blob/usn3.0-burrow/tests/tests.js#L1796
+
+### Burn USN: repay USN and withdraw a collateral
+
+Example: https://github.com/binary-star-near/usn/blob/usn3.0-burrow/tests/tests.js#L1934
+
+## USN 2.0
+
+### Obtain USN for USDT
 
 _Method:_ `ft_transfer_call` (USDT) -> `ft_on_transfer` (USN)
 
-<img alt="Deposit USDT" src="images/deposit.svg" />
+<img alt="Deposit USDT" src="images/usn2.0_deposit.svg" />
 
-## Withdraw USDT with `withdraw` API
+### Withdraw USDT with `withdraw` API
 
 _Method:_ `withdraw` (USN)
 
-<img alt="Withdraw USDT" src="images/withdraw.svg" />
+<img alt="Withdraw USDT" src="images/usn2.0_withdraw.svg" />
 
 # Build
 
@@ -205,7 +232,7 @@ pub fn remove_guardians(&mut self, guardians: Vec<AccountId>);
 pub fn add_stable_asset(&mut self, asset_id: &AccountId, decimals: u8);
 pub fn enable_stable_asset(&mut self, asset_id: &AccountId);
 pub fn disable_stable_asset(&mut self, asset_id: &AccountId);
-pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128); 
+pub fn transfer_commission(&mut self, account_id: AccountId, amount: U128);
 pub fn set_commission_rate(&mut self, asset_id: &AccountId, rate: CommissionRate)
 pub fn stake(&self, amount: U128, pool_id: AccountId) -> Promise;
 pub fn unstake(&self, amount: U128, pool_id: AccountId) -> Promise;

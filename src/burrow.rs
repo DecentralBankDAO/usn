@@ -111,6 +111,7 @@ trait ExtSelfBurrow {
 
 #[near_bindgen]
 impl ExtSelfBurrow for Contract {
+    #[private]
     fn after_ft_transfer(
         &mut self,
         account_id: AccountId,

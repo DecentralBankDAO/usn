@@ -33,17 +33,17 @@ impl Burrow {
         data: PriceData,
         msg: String,
         token: &mut FungibleTokenFreeStorage,
-        guardians: &UnorderedSet<AccountId>,
+        is_liquidator: bool,
     ) {
         let actions = match serde_json::from_str(&msg).expect("Can't parse PriceReceiverMsg") {
             PriceReceiverMsg::Execute { actions } => actions,
         };
 
-        let account_id = if guardians.contains(&sender_id) {
+        let account_id = if is_liquidator {
             assert_eq!(actions.len(), 1);
             match &actions[0] {
                 Action::Liquidate { .. } => usn_id(),
-                _ => env::panic_str("Only liquidation action can be done by guardian"),
+                _ => env::panic_str("Only liquidation action can be done by liquidator"),
             }
         } else {
             sender_id

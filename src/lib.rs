@@ -17,7 +17,7 @@ use near_contract_standards::fungible_token::metadata::{
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use near_contract_standards::fungible_token::resolver::FungibleTokenResolver;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
+use near_sdk::collections::{LazyOption, LookupMap, UnorderedMap, UnorderedSet};
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
@@ -59,6 +59,13 @@ enum StorageKey {
     BurrowInactiveAssetFarmRewards { farm_id: FarmId },
     BurrowAssetIds,
     BurrowConfig,
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub enum GuardianRole {
+    Basic,
+    BurrowLiquidator,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -147,7 +154,7 @@ impl CommissionOutput {
 pub struct Contract {
     owner_id: AccountId,
     proposed_owner_id: AccountId,
-    guardians: UnorderedSet<AccountId>,
+    guardians: UnorderedMap<AccountId, GuardianRole>,
     token: FungibleTokenFreeStorage,
     metadata: LazyOption<FungibleTokenMetadata>,
     black_list: LookupMap<AccountId, BlackListStatus>,
@@ -257,7 +264,7 @@ impl Contract {
         let this = Self {
             owner_id: owner_id.clone(),
             proposed_owner_id: owner_id,
-            guardians: UnorderedSet::new(StorageKey::Guardians),
+            guardians: UnorderedMap::new(StorageKey::Guardians),
             token: FungibleTokenFreeStorage::new(StorageKey::Token),
             metadata: LazyOption::new(StorageKey::TokenMetadata, Some(&metadata)),
             black_list: LookupMap::new(StorageKey::Blacklist),
@@ -383,13 +390,18 @@ impl Contract {
             oracle: Oracle,
         }
 
-        let prev: PrevContract = env::state_read().expect("Contract is not initialized");
-        let config = Config::default();
+        let mut prev: PrevContract = env::state_read().expect("Contract is not initialized");
+        let guardians = prev.guardians.to_vec();
+        prev.guardians.clear();
+        let mut new_guardians = UnorderedMap::new(StorageKey::Guardians);
+        for guardian in guardians {
+            new_guardians.insert(&guardian, &GuardianRole::Basic);
+        }
 
         Self {
             owner_id: prev.owner_id,
             proposed_owner_id: prev.proposed_owner_id,
-            guardians: prev.guardians,
+            guardians: new_guardians,
             token: prev.token,
             metadata: prev.metadata,
             black_list: prev.black_list,
@@ -397,7 +409,7 @@ impl Contract {
             commission: prev.commission,
             stable_treasury: prev.stable_treasury,
             oracle: prev.oracle,
-            burrow: Burrow::new(config),
+            burrow: Burrow::new(Config::default()),
         }
     }
 
@@ -900,29 +912,27 @@ mod tests {
         testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
         testing_env!(context.predecessor_account_id(accounts(2)).build());
-        contract.extend_guardians(vec![accounts(3)]);
+        contract.extend_guardians(vec![accounts(3)], GuardianRole::Basic);
     }
 
     #[test]
     fn test_guardians() {
-        let mut context = get_context(accounts(1));
+        let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
-        testing_env!(context.predecessor_account_id(accounts(1)).build());
-        contract.extend_guardians(vec![accounts(2)]);
-        assert!(contract.guardians.contains(&accounts(2)));
+        contract.extend_guardians(vec![accounts(2)], GuardianRole::Basic);
+        assert!(contract.guardians.get(&accounts(2)).is_some());
         contract.remove_guardians(vec![accounts(2)]);
-        assert!(!contract.guardians.contains(&accounts(2)));
+        assert!(contract.guardians.get(&accounts(2)).is_none());
     }
 
     #[test]
     fn test_view_guardians() {
-        let mut context = get_context(accounts(1));
+        let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
-        testing_env!(context.predecessor_account_id(accounts(1)).build());
-        contract.extend_guardians(vec![accounts(2)]);
-        assert_eq!(contract.guardians()[0], accounts(2));
+        contract.extend_guardians(vec![accounts(2)], GuardianRole::Basic);
+        assert_eq!(contract.guardians()[0], (accounts(2), GuardianRole::Basic));
         contract.remove_guardians(vec![accounts(2)]);
         assert_eq!(contract.guardians().len(), 0);
     }
@@ -930,13 +940,26 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_cannot_remove_guardians() {
-        let mut context = get_context(accounts(1));
+        let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = Contract::new(accounts(1));
-        testing_env!(context.predecessor_account_id(accounts(1)).build());
-        contract.extend_guardians(vec![accounts(2)]);
-        assert!(contract.guardians.contains(&accounts(2)));
+        contract.extend_guardians(vec![accounts(2)], GuardianRole::Basic);
+        assert!(contract.guardians.get(&accounts(2)).is_some());
         contract.remove_guardians(vec![accounts(3)]);
+    }
+
+    #[test]
+    fn test_change_guardian_role() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(accounts(1));
+        contract.extend_guardians(vec![accounts(2)], GuardianRole::Basic);
+        assert_eq!(contract.guardians()[0], (accounts(2), GuardianRole::Basic));
+        contract.extend_guardians(vec![accounts(2)], GuardianRole::BurrowLiquidator);
+        assert_eq!(
+            contract.guardians()[0],
+            (accounts(2), GuardianRole::BurrowLiquidator)
+        );
     }
 
     #[test]

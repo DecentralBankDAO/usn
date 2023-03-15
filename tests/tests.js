@@ -84,14 +84,22 @@ describe('Owner', function () {
   it('should be able to assign guardians', async () => {
     await assert.doesNotReject(async () => {
       await global.usnContract.extend_guardians({
-        args: { guardians: [config.aliceId] },
+        args: { guardians: [config.aliceId], role: "Basic" },
       });
     });
   });
 
   it('should get guardians', async () => {
     const guardians = await global.aliceContract.guardians();
-    assert.deepEqual(guardians, [config.aliceId]);
+    assert.deepEqual(guardians, [[config.aliceId, "Basic"]]);
+  });
+
+  it('should change guardian role', async () => {
+    await global.usnContract.extend_guardians({
+      args: { guardians: [config.aliceId], role: "BurrowLiquidator" },
+    });
+    const guardians = await global.aliceContract.guardians();
+    assert.deepEqual(guardians, [[config.aliceId, "BurrowLiquidator"]]);
   });
 
   it('should be able to remove guardians', async () => {
@@ -228,7 +236,7 @@ describe('Guardian', function () {
 
   before(async () => {
     await global.usnContract.extend_guardians({
-      args: { guardians: [config.aliceId] },
+      args: { guardians: [config.aliceId], role: "Basic" },
     });
   });
 
@@ -2166,7 +2174,7 @@ describe('Borrow USN', async function () {
     assert.equal(aliceAccountAfter.supplied.length, 0);
   });
 
-  it('should be able to liquidate', async () => {
+  it('should fail to liquidate as was called not by liquidator', async () => {
     const msg = '{\"Execute\": {\"actions\": [{\"BorrowUsn\": \"10000000000000\"}]}}';
 
     // Alice borrows USN
@@ -2177,10 +2185,6 @@ describe('Borrow USN', async function () {
       },
       amount: ONE_YOCTO,
       gas: GAS_FOR_CALL,
-    });
-
-    await global.usnContract.extend_guardians({
-      args: { guardians: [config.carolId] },
     });
 
     await oracleContract.report_prices({
@@ -2194,6 +2198,78 @@ describe('Borrow USN', async function () {
       },
     });
 
+    const liquidationAmount = '100000000000';
+    const collateralAmount = '100000';
+    const msgLiquidate = '{\"Execute\": {\"actions\": [{\"Liquidate\": {\"account_id\": \"alice.test.near\", \"in_assets\": [{\"token_id\": \"usn.test.near\", \"amount\":\"'
+      + liquidationAmount + '\"}], \"out_assets\": [{\"token_id\": \"weth.test.near\", \"amount\":\"' + collateralAmount + '\"}]}}]}}';
+
+    await assert.rejects(
+      async () => {
+        // User tries to liquidate Alice position
+        await global.carolOracle.oracle_call({
+          args: {
+            receiver_id: config.usnId,
+            msg: msgLiquidate,
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Liquidation of USN asset should be done only by USN account/);
+        return true;
+      }
+    );
+  });
+
+  it('should fail to liquidate as there are too many actions', async () => {
+    await global.usnContract.extend_guardians({
+      args: { guardians: [config.carolId], role: "BurrowLiquidator" },
+    });
+
+    const liquidationAmount = '100000000000';
+    const collateralAmount = '100000';
+    const msgLiquidate = '{\"Execute\": {\"actions\": [{\"Liquidate\": {\"account_id\": \"alice.test.near\", \"in_assets\": [{\"token_id\": \"usn.test.near\", \"amount\":\"'
+      + liquidationAmount + '\"}], \"out_assets\": [{\"token_id\": \"weth.test.near\", \"amount\":\"' + collateralAmount + '\"}]}}, {\"BorrowUsn\": \"10000000000000\"}]}}';
+
+    await assert.rejects(
+      async () => {
+        // Guardian tries to liquidate Alice position and borrow some USN
+        await global.carolOracle.oracle_call({
+          args: {
+            receiver_id: config.usnId,
+            msg: msgLiquidate,
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      }
+    );
+  });
+
+  it('should fail to borrow USN from liquidation account', async () => {
+    const msgLiquidate = '{\"Execute\": {\"actions\": [{\"BorrowUsn\": \"10000000000000\"}]}}';
+
+    await assert.rejects(
+      async () => {
+        // Guardian tries to liquidate Alice position and borrow some USN
+        await global.carolOracle.oracle_call({
+          args: {
+            receiver_id: config.usnId,
+            msg: msgLiquidate,
+          },
+          amount: ONE_YOCTO,
+          gas: GAS_FOR_CALL,
+        });
+      },
+      (err) => {
+        assert.match(err.message, /Only liquidation action can be done by liquidator/);
+        return true;
+      }
+    );
+  });
+
+  it('should be able to liquidate', async () => {
     const aliceUsnBefore = await global.usnContract.ft_balance_of({
       account_id: config.aliceId,
     });

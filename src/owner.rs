@@ -10,7 +10,9 @@ impl Contract {
 
     pub(crate) fn assert_owner_or_guardian(&self) {
         let predecessor_id = env::predecessor_account_id();
-        if predecessor_id != self.owner_id && !self.guardians.contains(&predecessor_id) {
+        if predecessor_id != self.owner_id
+            && !self.check_guardian_role(&predecessor_id, GuardianRole::Basic)
+        {
             env::panic_str("This method can be called only by owner or guardian")
         }
     }
@@ -31,12 +33,10 @@ impl Contract {
     }
 
     /// Extend guardians. Only can be called by owner.
-    pub fn extend_guardians(&mut self, guardians: Vec<AccountId>) {
+    pub fn extend_guardians(&mut self, guardians: Vec<AccountId>, role: GuardianRole) {
         self.assert_owner();
         for guardian in guardians {
-            if !self.guardians.insert(&guardian) {
-                env::panic_str(&format!("The guardian '{}' already exists", guardian));
-            }
+            self.guardians.insert(&guardian, &role);
         }
     }
 
@@ -44,13 +44,21 @@ impl Contract {
     pub fn remove_guardians(&mut self, guardians: Vec<AccountId>) {
         self.assert_owner();
         for guardian in guardians {
-            if !self.guardians.remove(&guardian) {
+            if self.guardians.remove(&guardian).is_none() {
                 env::panic_str(&format!("The guardian '{}' doesn't exist", guardian));
             }
         }
     }
 
-    pub fn guardians(&self) -> Vec<AccountId> {
+    pub fn check_guardian_role(&self, account_id: &AccountId, role: GuardianRole) -> bool {
+        if let Some(guardian_role) = self.guardians.get(&account_id) {
+            guardian_role == role
+        } else {
+            false
+        }
+    }
+
+    pub fn guardians(&self) -> Vec<(AccountId, GuardianRole)> {
         self.guardians.to_vec()
     }
 }

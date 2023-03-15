@@ -279,6 +279,15 @@ async function sandboxSetup() {
     gas: GAS_FOR_CALL,
   });
 
+  // Register Carol account 
+  await usnContract.storage_deposit({
+    args: {
+      account_id: config.carolId
+    },
+    amount: ONE_NEAR,
+    gas: GAS_FOR_CALL,
+  });
+
   // Deploy USDT contract.
   const wasmUsdt = await fs.readFile(config.usdtPath);
   const usdtAccount = new nearAPI.Account(near.connection, config.usdtId);

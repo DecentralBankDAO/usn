@@ -92,8 +92,9 @@ impl OraclePriceReceiver for Contract {
     /// - Requires to be called by the oracle account ID.
     fn oracle_on_call(&mut self, sender_id: AccountId, data: PriceData, msg: String) {
         assert_eq!(env::predecessor_account_id(), CONFIG.oracle_address());
+        let is_liquidator = self.check_guardian_role(&sender_id, GuardianRole::BurrowLiquidator);
         self.burrow
-            .oracle_on_call(sender_id, data, msg, &mut self.token, &self.guardians);
+            .oracle_on_call(sender_id, data, msg, &mut self.token, is_liquidator);
     }
 }
 
